@@ -90,6 +90,20 @@ public class Item {
         return this.preco * this.quantidade;
     }
 
+    /**
+     * Preço unitário convertido para latão (menor unidade do sistema monetário).
+     */
+    public long getPrecoEmLatao() {
+        return Carteira.ouroParaLatao(this.preco);
+    }
+
+    /**
+     * Valor total do estoque deste item (preço × quantidade), em latão.
+     */
+    public long getValorTotalEmLatao() {
+        return getPrecoEmLatao() * this.quantidade;
+    }
+
     public int getId() {
         return id;
     }
@@ -169,8 +183,8 @@ public class Item {
 
     @Override
     public String toString() {
-        return String.format("%s [x%d] (%.2f PO, %.1f kg) - %s (%s)", 
-            nome, quantidade, preco, peso, tipo, raridade);
+        return String.format("%s [x%d] (%s, %.1f kg) - %s (%s)",
+            nome, quantidade, Carteira.formatarLatao(getPrecoEmLatao()), peso, tipo, raridade);
     }
 }
 

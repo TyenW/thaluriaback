@@ -3,7 +3,8 @@ package geografia;
 import java.util.Objects;
 
 /**
- * Representa uma rota de viagem (terrestre ou marítima) ligando duas cidades em Thaluria.
+ * Representa uma rota de viagem (terrestre ou marítima) ligando duas cidades em
+ * Thaluria.
  */
 public class Conexao {
 
@@ -12,15 +13,25 @@ public class Conexao {
         MARITIMA("Marítima");
 
         private final String nomeFormatado;
-        TipoDeRota(String nomeFormatado) { this.nomeFormatado = nomeFormatado; }
-        public String getNomeFormatado() { return nomeFormatado; }
-        @Override public String toString() { return nomeFormatado; }
+
+        TipoDeRota(String nomeFormatado) {
+            this.nomeFormatado = nomeFormatado;
+        }
+
+        public String getNomeFormatado() {
+            return nomeFormatado;
+        }
+
+        @Override
+        public String toString() {
+            return nomeFormatado;
+        }
     }
 
     private final Cidade origem;
     private final Cidade destino;
     private final int distanciaKm;
-    private final int perigo; // Escala de 1 a 10
+    private int perigo; // Escala de 1 a 10
     private final TipoDeRota tipo;
     private boolean bloqueada;
 
@@ -52,6 +63,10 @@ public class Conexao {
         destino.adicionarConexao(this);
     }
 
+    public void ajustarPerigo(int delta) {
+        this.perigo = Math.max(1, Math.min(10, this.perigo + delta));
+    }
+
     public void bloquear() {
         this.bloqueada = true;
     }
@@ -67,8 +82,10 @@ public class Conexao {
         if (c == null) {
             throw new IllegalArgumentException("Cidade de referência não pode ser nula");
         }
-        if (c.equals(origem)) return destino;
-        if (c.equals(destino)) return origem;
+        if (c.equals(origem))
+            return destino;
+        if (c.equals(destino))
+            return origem;
         throw new IllegalArgumentException("A cidade '" + c.getNome() + "' não pertence a esta conexão");
     }
 
@@ -98,11 +115,13 @@ public class Conexao {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         Conexao conexao = (Conexao) o;
         return (Objects.equals(origem, conexao.origem) && Objects.equals(destino, conexao.destino)) ||
-               (Objects.equals(origem, conexao.destino) && Objects.equals(destino, conexao.origem));
+                (Objects.equals(origem, conexao.destino) && Objects.equals(destino, conexao.origem));
     }
 
     @Override
@@ -113,6 +132,6 @@ public class Conexao {
     @Override
     public String toString() {
         return String.format("[%s] %s <---> %s (%d km, Perigo: %d/10%s)",
-            tipo, origem.getNome(), destino.getNome(), distanciaKm, perigo, bloqueada ? " [BLOQUEADA]" : "");
+                tipo, origem.getNome(), destino.getNome(), distanciaKm, perigo, bloqueada ? " [BLOQUEADA]" : "");
     }
 }

@@ -63,9 +63,9 @@ public class Lojas {
         if (item == null || carteiraCliente == null) return false;
         if (!estoque.contains(item)) return false;
 
-        double preco = item.getPreco();
-        if (carteiraCliente.pagar(preco)) {
-            this.caixa.adicionarMoedas((int) preco, 0, 0);
+        long preco = item.getPrecoEmLatao();
+        if (carteiraCliente.pagarLatao(preco)) {
+            this.caixa.receberLatao(preco);
             item.removerQuantidade(1);
             if (item.getQuantidade() <= 0) {
                 estoque.remove(item);
@@ -80,8 +80,9 @@ public class Lojas {
      */
     public boolean comprarItem(Item item, Carteira carteiraCliente, double precoCompra) {
         if (item == null || carteiraCliente == null) return false;
-        if (this.caixa.pagar(precoCompra)) {
-            carteiraCliente.adicionarOuro((int) precoCompra);
+        long precoLatao = Carteira.ouroParaLatao(precoCompra);
+        if (this.caixa.pagarLatao(precoLatao)) {
+            carteiraCliente.receberLatao(precoLatao);
             adicionarItem(item);
             return true;
         }
