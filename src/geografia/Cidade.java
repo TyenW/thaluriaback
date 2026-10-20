@@ -85,6 +85,9 @@ public class Cidade {
     public void adicionarLoja(Lojas loja) {
         if (loja != null && !this.lojas.contains(loja)) {
             this.lojas.add(loja);
+            if (loja.getCidadeSede() != this) {
+                loja.setCidadeSede(this);
+            }
         }
     }
 
@@ -202,6 +205,68 @@ public class Cidade {
     public Aquifero getAquifero() { return aquifero; }
     public void setAquifero(Aquifero aquifero) { this.aquifero = aquifero; }
 
+    /**
+     * Calcula a probabilidade diária de um fornecedor NPC local vender um determinado item nesta cidade,
+     * baseando-se no bioma (Regiao) e na formação de relevo (Geologia).
+     * Servirá de fundação para o sistema de Crafting regional.
+     */
+    public double calcularChanceFornecedorNpc(economia.Item item) {
+        if (item == null) return 0.35;
+        double chanceBase = 0.35;
+        String nome = item.getNome().toLowerCase();
+
+        boolean isMadeira = nome.contains("madeira") || nome.contains("tronco") || nome.contains("tábua");
+        boolean isMineral = (nome.contains("ferro") || nome.contains("minério") || nome.contains("lingote")
+                || nome.contains("metal") || nome.contains("aço") || (item.getTipo() == economia.Item.TipoItem.MATERIAL && !isMadeira));
+        boolean isGema = nome.contains("gema") || nome.contains("cristal") || nome.contains("diamante")
+                || nome.contains("joia") || item.getTipo() == economia.Item.TipoItem.ACESSORIO;
+        boolean isErvaAlquimica = nome.contains("erva") || nome.contains("poção") || nome.contains("planta")
+                || nome.contains("elixir") || nome.contains("raiz");
+        boolean isTecidoCouro = nome.contains("seda") || nome.contains("manto") || nome.contains("couro")
+                || nome.contains("pele") || nome.contains("tecido") || nome.contains("linho");
+
+        // 1. Afinidade de MONTANHA / CAVERNA -> Minérios, Metais e Gemas
+        if (geologia == Geologia.MONTANHA || geologia == Geologia.CAVERNA) {
+            if (isMadeira) return 0.15; // Escasso em altas montanhas rochosas
+            if (isMineral) return 0.65;
+            if (isGema) return 0.60;
+        }
+
+        // 2. Afinidade de FLORESTA / TAIGA / TUNDRA / TROPICAL -> Madeira, Couros, Caça
+        if (geologia == Geologia.FLORESTA || regiao == Regiao.TUNDRA || regiao == Regiao.TAIGA || regiao == Regiao.TROPICAL) {
+            if (isMadeira) return 0.70;
+            if (isTecidoCouro) return 0.60;
+            if (isMineral) return 0.20;
+        }
+
+        // 3. Afinidade de PLANÍCIE / VALE / TEMPERADO -> Ervas Alquímicas, Fibras, Seda, Alimentos
+        if (geologia == Geologia.PLANICIE || geologia == Geologia.VALE || regiao == Regiao.TEMPERADO) {
+            if (isErvaAlquimica) return 0.65;
+            if (isTecidoCouro) return 0.60;
+        }
+
+        // 4. Afinidade de DESERTO / SAVANA / CANYON -> Gemas Preciosas, Cristais e Joalheria
+        if (regiao == Regiao.DESERTO || regiao == Regiao.SAVANA || geologia == Geologia.CANYON) {
+            if (isGema) return 0.75;
+            if (isMadeira) return 0.10; // Raro no deserto
+        }
+
+        return chanceBase;
+    }
+
+    /**
+     * Calcula a quantidade de matéria-prima fornecida por lote, bonificando regiões abundantes.
+     */
+    public int calcularQtdFornecedorNpc(economia.Item item, java.util.Random random) {
+        if (random == null) random = new java.util.Random();
+        double chance = calcularChanceFornecedorNpc(item);
+        if (chance >= 0.60) {
+            // Região de alta afinidade e abundância: lote ampliado
+            return 2 + random.nextInt(4); // 2 a 5 unidades
+        }
+        return 1 + random.nextInt(3); // 1 a 3 unidades
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -219,7 +284,9 @@ public class Cidade {
     public String toString() {
         String infoFronteira = fronteira ? " (Fronteira com " + regiaofronteira + ")" : "";
         String infoPorto = porto ? " [Porto Ativo]" : "";
-        return String.format("%s [ID: %d] - %s em %s%s%s (Rotas ativas: %d)",
-            nome, id, tipo, regiao, infoPorto, infoFronteira, conexoes.size());
+        String infoGeol = (geologia != null) ? " | " + geologia.getNomeFormatado() : "";
+        String infoAqui = (aquifero != null) ? " | " + aquifero.getNomeFormatado() : "";
+        return String.format("%s [ID: %d] - %s em %s%s%s%s%s (Rotas ativas: %d)",
+            nome, id, tipo, regiao, infoPorto, infoFronteira, infoGeol, infoAqui, conexoes.size());
     }
 }

@@ -1,0 +1,13 @@
+# Java bytecode
+*.class
+
+# Package Files
+*.jar
+*.war
+*.ear
+
+# Logs and temporary files
+*.log
+scratch/
+bin/
+out/

@@ -188,11 +188,4 @@ public class Item {
     }
 }
 
-/**
- * Subclasse para retrocompatibilidade com código que utilizava o identificador 'item' em minúsculo.
- */
-class item extends Item {
-    public item() { super(); }
-    public item(String nome, double preco) { super(nome, preco); }
-    public item(int id, String nome, double preco) { super(id, nome, preco); }
-}
+

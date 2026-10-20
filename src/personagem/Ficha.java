@@ -42,6 +42,9 @@ public class Ficha {
     private Carteira carteira;
     private final List<Item> inventario = new ArrayList<>();
 
+    // Localização Geográfica do Personagem no Mundo
+    private geografia.Cidade cidadeAtual;
+
     public Ficha() {
         this(10, 10, 10, 10, 10, 10);
     }
@@ -215,6 +218,9 @@ public class Ficha {
 
     public List<Item> getInventario() { return Collections.unmodifiableList(inventario); }
 
+    public geografia.Cidade getCidadeAtual() { return cidadeAtual; }
+    public void setCidadeAtual(geografia.Cidade cidadeAtual) { this.cidadeAtual = cidadeAtual; }
+
     @Override
     public String toString() {
         return String.format("Ficha [HP: %d/%d | SAN: %d/%d | Energia: %d/%d | Mana: %d/%d | Def.Fís: %d | Def.Oculta: %d]\n" +
@@ -224,12 +230,4 @@ public class Ficha {
     }
 }
 
-/**
- * Subclasse para retrocompatibilidade com código que utilizava o identificador 'ficha' em minúsculo.
- */
-class ficha extends Ficha {
-    public ficha() { super(); }
-    public ficha(int vig, int forca, int des, int men, int esp, int von) {
-        super(vig, forca, des, men, esp, von);
-    }
-}
+
