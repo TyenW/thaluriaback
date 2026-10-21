@@ -83,6 +83,9 @@ public class MotorEconomico {
                         solicitarCompraEntreCidades(loja, modelo, deficit);
                     }
                 }
+
+                // 4. Manufatura autônoma da loja para atender ao livro de receitas de artesanato
+                loja.processarCraftingDiario(diaAtual, horaAtual);
             }
         }
     }

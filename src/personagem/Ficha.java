@@ -1,10 +1,7 @@
 package personagem;
 
-import economia.Carteira;
-import economia.Item;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import economia.*;
+import java.util.*;
 
 /**
  * Representa a Ficha de Personagem no sistema RPG Thaluria.
@@ -41,6 +38,14 @@ public class Ficha {
     // Inventário e Economia
     private Carteira carteira;
     private final List<Item> inventario = new ArrayList<>();
+
+    // Sistema de Equipamento Tático v4 e Efeitos v4.1
+    private final Map<FichaArmadura.SlotArmadura, Item> armadurasEquipadas = new EnumMap<>(FichaArmadura.SlotArmadura.class);
+    private final Map<FichaAcessorio.SlotAcessorio, Item> acessoriosEquipados = new EnumMap<>(FichaAcessorio.SlotAcessorio.class);
+    private Item maoPrincipal;
+    private Item maoSecundaria;
+    private final List<EfeitoItem> efeitosAtivos = new ArrayList<>();
+    private final Map<EfeitoItem, Integer> turnosRestantesEfeito = new LinkedHashMap<>();
 
     // Localização Geográfica do Personagem no Mundo
     private geografia.Cidade cidadeAtual;
@@ -161,6 +166,10 @@ public class Ficha {
         if (cura > 0) this.hp = Math.min(this.hpMax, this.hp + cura);
     }
 
+    public void sofrerDano(int dano) {
+        if (dano > 0) this.hp = Math.max(0, this.hp - dano);
+    }
+
     public void curarSanidade(int cura) {
         if (cura > 0) this.sanidade = Math.min(this.sanidadeMax, this.sanidade + cura);
     }
@@ -171,6 +180,295 @@ public class Ficha {
 
     public boolean removerItem(Item item) {
         return this.inventario.remove(item);
+    }
+
+    // --- Gestão de Capacidade da Mochila e Peso ---
+    public double getCapacidadeCargaKg() {
+        return 50.0 + (this.forca * 3.0) + (this.vig * 2.0);
+    }
+
+    public double getCapacidadeMochilaSlots() {
+        return 50.0;
+    }
+
+    public double getPesoTotalInventario() {
+        double total = 0.0;
+        for (Item it : inventario) {
+            total += it.getPesoTotal();
+        }
+        return total;
+    }
+
+    public double getVolumeTotalInventario() {
+        double total = 0.0;
+        for (Item it : inventario) {
+            total += it.getEspacoTotal();
+        }
+        return total;
+    }
+
+    public boolean adicionarAoInventarioComValidacao(Item item) {
+        if (item == null) return false;
+        if (item.getTamanho() == TamanhoItem.COLOSSAL) return false;
+        if (getPesoTotalInventario() + item.getPesoTotal() > getCapacidadeCargaKg()) return false;
+        if (getVolumeTotalInventario() + item.getEspacoTotal() > getCapacidadeMochilaSlots()) return false;
+        this.inventario.add(item);
+        return true;
+    }
+
+    // --- Sistema de Equipamento de Armadura (13 Slots Multi-Ocupação) ---
+    public boolean equiparArmadura(Item armadura) {
+        if (armadura == null || armadura.getFichaArmadura() == null) return false;
+        Set<FichaArmadura.SlotArmadura> slots = armadura.getFichaArmadura().getSlotsOcupados();
+        if (slots.isEmpty()) return false;
+
+        // Valida se todos os slots exigidos pela peça estão livres
+        for (FichaArmadura.SlotArmadura s : slots) {
+            if (armadurasEquipadas.containsKey(s)) {
+                return false; // Conflito: ao menos um slot já está ocupado
+            }
+        }
+
+        // Ocupa todos os slots
+        for (FichaArmadura.SlotArmadura s : slots) {
+            armadurasEquipadas.put(s, armadura);
+        }
+        removerItem(armadura);
+        return true;
+    }
+
+    public Item desequiparArmadura(FichaArmadura.SlotArmadura slot) {
+        Item item = armadurasEquipadas.get(slot);
+        if (item != null) {
+            armadurasEquipadas.values().removeIf(it -> it.equals(item));
+            adicionarItem(item);
+            return item;
+        }
+        return null;
+    }
+
+    public int calcularReducaoDanoTotalArmaduras() {
+        Set<Item> unicos = new HashSet<>(armadurasEquipadas.values());
+        int rdTotal = 0;
+        for (Item it : unicos) {
+            if (it.getFichaArmadura() != null) {
+                rdTotal += it.getFichaArmadura().getReducaoDeDanoEfetiva();
+            }
+        }
+        return rdTotal;
+    }
+
+    // --- Sistema de Equipamento de Acessórios (5 Slots Exclusivos) ---
+    public boolean equiparAcessorio(Item acessorio) {
+        if (acessorio == null || acessorio.getFichaAcessorio() == null) return false;
+        FichaAcessorio.SlotAcessorio slot = acessorio.getFichaAcessorio().getSlotExclusivo();
+        if (acessoriosEquipados.containsKey(slot)) {
+            return false; // Slot de acessório já ocupado
+        }
+        acessoriosEquipados.put(slot, acessorio);
+        removerItem(acessorio);
+        return true;
+    }
+
+    public Item desequiparAcessorio(FichaAcessorio.SlotAcessorio slot) {
+        Item it = acessoriosEquipados.remove(slot);
+        if (it != null) {
+            adicionarItem(it);
+            return it;
+        }
+        return null;
+    }
+
+    // --- Sistema de Empunhadura de Combate (Armas e Escudos) ---
+    public boolean equiparMaoPrincipal(Item arma) {
+        if (arma == null) return false;
+        boolean exigeDuasMaos = false;
+        if (arma.getFichaArmaBranca() != null) {
+            exigeDuasMaos = (arma.getFichaArmaBranca().getEmpunhadura() == FichaArmaBranca.Empunhadura.DUAS_MAOS);
+        } else if (arma.getFichaArmaLongoAlcance() != null) {
+            exigeDuasMaos = (arma.getFichaArmaLongoAlcance().getEmpunhadura() == FichaArmaBranca.Empunhadura.DUAS_MAOS);
+        }
+
+        if (exigeDuasMaos && this.maoSecundaria != null) {
+            return false; // Mão secundária ocupada impede arma de duas mãos
+        }
+
+        if (this.maoPrincipal != null) {
+            desequiparMaoPrincipal();
+        }
+
+        this.maoPrincipal = arma;
+        removerItem(arma);
+        return true;
+    }
+
+    public boolean equiparMaoSecundaria(Item itemOuEscudo) {
+        if (itemOuEscudo == null) return false;
+        if (this.maoPrincipal != null) {
+            boolean principalDuasMaos = false;
+            if (this.maoPrincipal.getFichaArmaBranca() != null) {
+                principalDuasMaos = (this.maoPrincipal.getFichaArmaBranca().getEmpunhadura() == FichaArmaBranca.Empunhadura.DUAS_MAOS);
+            } else if (this.maoPrincipal.getFichaArmaLongoAlcance() != null) {
+                principalDuasMaos = (this.maoPrincipal.getFichaArmaLongoAlcance().getEmpunhadura() == FichaArmaBranca.Empunhadura.DUAS_MAOS);
+            }
+            if (principalDuasMaos) {
+                return false; // Arma de duas mãos na mão principal impede empunhar mão secundária
+            }
+        }
+
+        if (itemOuEscudo.getFichaEscudo() != null && itemOuEscudo.getFichaEscudo().getEmpunhadura() == FichaArmaBranca.Empunhadura.DUAS_MAOS) {
+            if (this.maoPrincipal != null) {
+                return false; // Escudo torre de duas mãos exige que ambas as mãos estejam livres
+            }
+        }
+
+        if (this.maoSecundaria != null) {
+            desequiparMaoSecundaria();
+        }
+
+        this.maoSecundaria = itemOuEscudo;
+        removerItem(itemOuEscudo);
+        return true;
+    }
+
+    public Item desequiparMaoPrincipal() {
+        Item it = this.maoPrincipal;
+        if (it != null) {
+            this.maoPrincipal = null;
+            adicionarItem(it);
+        }
+        return it;
+    }
+
+    public Item desequiparMaoSecundaria() {
+        Item it = this.maoSecundaria;
+        if (it != null) {
+            this.maoSecundaria = null;
+            adicionarItem(it);
+        }
+        return it;
+    }
+
+    public Map<FichaArmadura.SlotArmadura, Item> getArmadurasEquipadas() {
+        return Collections.unmodifiableMap(armadurasEquipadas);
+    }
+
+    public Map<FichaAcessorio.SlotAcessorio, Item> getAcessoriosEquipados() {
+        return Collections.unmodifiableMap(acessoriosEquipados);
+    }
+
+    public Item getMaoPrincipal() { return maoPrincipal; }
+    public Item getMaoSecundaria() { return maoSecundaria; }
+
+    // --- Execução de Passivas e Efeitos Ativos (Item v4.1) ---
+    /**
+     * Avalia todas as passivas dos acessórios/equipamentos equipados para um determinado gatilho.
+     * Se a condição bater, ativa a passiva e aplica o EfeitoItem na Ficha!
+     */
+    public List<EfeitoItem> verificarEGatilharPassivas(PassivaItem.TipoCondicaoPassiva evento) {
+        List<EfeitoItem> recemAtivados = new ArrayList<>();
+        double pctVida = this.hpMax > 0 ? ((double) this.hp / this.hpMax) : 1.0;
+
+        for (Item acessorio : acessoriosEquipados.values()) {
+            if (acessorio.getFichaAcessorio() == null) continue;
+
+            int reducaoCd = (acessorio.isCraftado() && acessorio.getQualidadeCraft() != null)
+                    ? acessorio.getQualidadeCraft().getReducaoCooldownPassivaTurnos() : 0;
+
+            for (PassivaItem passiva : acessorio.getFichaAcessorio().getPassivas()) {
+                EfeitoItem efeitoDisparado = passiva.tentarAtivar(evento, pctVida, reducaoCd);
+                if (efeitoDisparado != null) {
+                    aplicarEfeitoNaFicha(efeitoDisparado);
+                    recemAtivados.add(efeitoDisparado);
+                }
+            }
+        }
+        return recemAtivados;
+    }
+
+    public void aplicarEfeitoNaFicha(EfeitoItem efeito) {
+        if (efeito == null) return;
+        if (!efeitosAtivos.contains(efeito)) {
+            efeitosAtivos.add(efeito);
+        }
+        turnosRestantesEfeito.put(efeito, efeito.getDuracaoTurnos());
+
+        if (efeito.getCuraInstantaneaHp() > 0) {
+            this.hp = Math.min(this.hpMax, this.hp + efeito.getCuraInstantaneaHp());
+        }
+    }
+
+    public void removerEfeitoDaFicha(EfeitoItem efeito) {
+        if (efeito != null) {
+            efeitosAtivos.remove(efeito);
+            turnosRestantesEfeito.remove(efeito);
+        }
+    }
+
+    public void avancarTurnoEfeitos() {
+        Iterator<Map.Entry<EfeitoItem, Integer>> it = turnosRestantesEfeito.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<EfeitoItem, Integer> entry = it.next();
+            int dur = entry.getValue();
+            if (dur > 0) {
+                dur--;
+                if (dur == 0) {
+                    efeitosAtivos.remove(entry.getKey());
+                    it.remove();
+                } else {
+                    entry.setValue(dur);
+                }
+            }
+        }
+    }
+
+    /**
+     * Retorna o Multiplicador Total de Dano do personagem (Ex: 2.0 se uma passiva dobrou o dano!).
+     */
+    public double getMultiplicadorDanoTotal() {
+        double mult = 1.0;
+        for (EfeitoItem ef : efeitosAtivos) {
+            mult *= ef.getMultiplicadorDano();
+        }
+        return mult;
+    }
+
+    /**
+     * Consulta qualquer status ("FORCA", "DESTREZA", "VIGOR", "MENTE", "ESPIRITO", "VONTADE") somando:
+     * Base da Ficha + Bônus de Acessórios (escalados por QualidadeCraft) + Efeitos de Passivas Ativas!
+     */
+    public int getAtributoEfetivo(String nomeAtributo) {
+        if (nomeAtributo == null) return 0;
+        int valor = switch (nomeAtributo.toUpperCase().trim()) {
+            case "FORCA", "FOR" -> this.forca;
+            case "DESTREZA", "DES" -> this.des;
+            case "VIGOR", "VIG" -> this.vig;
+            case "MENTE", "MEN", "INTELIGENCIA" -> this.men;
+            case "ESPIRITO", "ESP" -> this.esp;
+            case "VONTADE", "VON" -> this.von;
+            default -> 0;
+        };
+
+        // Soma bônus dos acessórios equipados (escalados se o acessório tiver QualidadeCraft)
+        for (Item acc : acessoriosEquipados.values()) {
+            if (acc.getFichaAcessorio() != null) {
+                int bonusBase = acc.getFichaAcessorio().getBonusAtributos().getOrDefault(nomeAtributo.toUpperCase().trim(), 0);
+                double multQualidade = (acc.isCraftado() && acc.getQualidadeCraft() != null)
+                        ? acc.getQualidadeCraft().getMultiplicadorAtributosEDano() : 1.0;
+                valor += (int) Math.round(bonusBase * multQualidade);
+            }
+        }
+
+        // Soma bônus dos EfeitoItem disparados por passivas ou consumíveis ativos
+        for (EfeitoItem ef : efeitosAtivos) {
+            valor += ef.getBonusStatus().getOrDefault(nomeAtributo.toUpperCase().trim(), 0);
+        }
+
+        return valor;
+    }
+
+    public List<EfeitoItem> getEfeitosAtivos() {
+        return Collections.unmodifiableList(efeitosAtivos);
     }
 
     // Graus (Tiers: a cada 10 pontos exatos = 1 Grau)

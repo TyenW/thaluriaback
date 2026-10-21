@@ -16,7 +16,8 @@ public class Lojas {
         LOJA_GERAL("Loja Geral / Empório"),
         ALQUIMIA("Alquimia / Botica"),
         JOALHERIA("Joalheria"),
-        TAVERNA("Taverna / Comidas e Bebidas");
+        TAVERNA("Taverna / Comidas e Bebidas"),
+        BOTANICA("Botânica / Alquimia");
 
         private final String nomeFormatado;
 
@@ -44,6 +45,8 @@ public class Lojas {
     // Vínculos geográficos e de especialização
     private Cidade cidadeSede;
     private TipoEstabelecimento tipoEstabelecimento;
+    private int nivelLoja = 3; // Nível da oficina (1 a 5), padrão 3 para compatibilidade v3
+    private final List<MoldeReceita> livroDeReceitas = new ArrayList<>();
 
     // Métricas de Mercado, Oferta e Demanda
     private final Map<Integer, Item> catalogoConhecido = new LinkedHashMap<>();
@@ -169,7 +172,8 @@ public class Lojas {
         double multiplicador = Math.sqrt(pressaoDemanda / pressaoOferta);
         multiplicador = Math.max(0.40, Math.min(2.50, multiplicador));
 
-        return Math.max(1L, Math.round(itemBase.getPrecoEmLatao() * multiplicador));
+        double multRegional = (cidadeSede != null) ? itemBase.calcularMultiplicadorRegional(cidadeSede) : 1.0;
+        return Math.max(1L, Math.round(itemBase.getPrecoEmLatao() * multiplicador * multRegional));
     }
 
     /**
@@ -285,14 +289,152 @@ public class Lojas {
         saidasRecentes.replaceAll((k, v) -> v / 2);
     }
 
+    public Item fabricarComMolde(MoldeReceita molde, List<Item> materiaisEntregues, int dia, int hora) {
+        if (molde == null) return null;
+        if (!OficinaCrafting.lojaAptaParaMolde(this, molde)) {
+            return null;
+        }
+
+        List<Item> insumosParaUso = new ArrayList<>();
+        boolean usandoEstoqueDaLoja = (materiaisEntregues == null || materiaisEntregues.isEmpty());
+
+        if (usandoEstoqueDaLoja) {
+            // Coletar do estoque da loja
+            for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
+                if (req.isSlotCatalisadorOpcional()) continue;
+                int aindaNecessario = req.getQuantidade();
+                for (Item item : this.estoque) {
+                    if (item.getFichaMaterial() != null
+                            && item.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()
+                            && item.getFichaMaterial().getQualidade() >= req.getQualidadeMinima()) {
+                        int pegar = Math.min(aindaNecessario, item.getQuantidade());
+                        Item copia = clonarItem(item, pegar);
+                        insumosParaUso.add(copia);
+                        aindaNecessario -= pegar;
+                        if (aindaNecessario <= 0) break;
+                    }
+                }
+                if (aindaNecessario > 0) {
+                    return null; // Falta matéria-prima no estoque da loja
+                }
+            }
+        } else {
+            insumosParaUso.addAll(materiaisEntregues);
+            if (!OficinaCrafting.validarInsumos(molde, insumosParaUso)) {
+                return null;
+            }
+        }
+
+        long custoMaoDeObra = molde.getCustoMaoDeObraEmLatao();
+        if (usandoEstoqueDaLoja) {
+            if (!caixa.pagarLatao(custoMaoDeObra)) {
+                return null; // Caixa insuficiente para pagar mão de obra da forja
+            }
+            // Deduz materiais do estoque da loja
+            for (Item usado : insumosParaUso) {
+                removerUnidades(usado.getId(), usado.getQuantidade());
+            }
+        }
+
+        // Fabrica o item através da OficinaCrafting
+        Item itemPronto = OficinaCrafting.fabricarItem(this, molde, insumosParaUso, 0);
+        if (itemPronto == null) {
+            if (usandoEstoqueDaLoja && custoMaoDeObra > 0) {
+                caixa.receberLatao(custoMaoDeObra);
+            }
+            return null;
+        }
+
+        if (usandoEstoqueDaLoja) {
+            adicionarItem(itemPronto);
+            registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CRAFTING,
+                    itemPronto.getNome(), 1, itemPronto.getPrecoEmLatao(),
+                    "Manufatura na oficina [" + itemPronto.getClassificacaoFormatada() + "]");
+        }
+
+        return itemPronto;
+    }
+
+    public boolean processarCraftingDiario(int dia, int hora) {
+        boolean fabricouAlgo = false;
+        for (MoldeReceita molde : new ArrayList<>(livroDeReceitas)) {
+            Item feito = fabricarComMolde(molde, null, dia, hora);
+            if (feito != null) {
+                fabricouAlgo = true;
+            } else {
+                for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
+                    if (req.isSlotCatalisadorOpcional()) continue;
+                    int presente = 0;
+                    Item exemplo = null;
+                    for (Item it : estoque) {
+                        if (it.getFichaMaterial() != null && it.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()) {
+                            presente += it.getQuantidade();
+                            exemplo = it;
+                        }
+                    }
+                    if (exemplo == null) {
+                        for (Item cat : catalogoConhecido.values()) {
+                            if (cat.getFichaMaterial() != null && cat.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()) {
+                                exemplo = cat;
+                                break;
+                            }
+                        }
+                    }
+                    if (presente < req.getQuantidade() && exemplo != null) {
+                        int deficit = req.getQuantidade() - presente;
+                        definirDemanda(exemplo, Math.max(demandaPorItem.getOrDefault(exemplo.getId(), 0), deficit + 2));
+                    }
+                }
+            }
+        }
+        return fabricouAlgo;
+    }
+
     public static Item clonarItem(Item base, int quantidade) {
         if (base == null) return null;
-        return new Item(base.getId(), base.getNome(), base.getDescricao(),
+        Item clone = new Item(base.getId(), base.getNome(), base.getDescricao(),
                 base.getPreco(), base.getPeso(), base.getTipo(), base.getRaridade(),
                 Math.max(1, quantidade));
+        clone.setTamanho(base.getTamanho());
+        clone.setRegiaoOrigem(base.getRegiaoOrigem());
+        clone.setGeologiaOrigem(base.getGeologiaOrigem());
+        clone.setAquiferoOrigem(base.getAquiferoOrigem());
+
+        if (base.getFichaMaterial() != null) {
+            FichaMaterial fm = base.getFichaMaterial();
+            FichaMaterial fmClone = new FichaMaterial(fm.getSubtipo(), fm.getQualidade(),
+                    fm.getBonusFacesDadoArma(), fm.getBonusResistenciaArmadura(), fm.getEfeitoAtribuido(),
+                    fm.isEspecificoDeOrigem(), fm.getSufixoCrafting());
+            for (EfeitoItem ef : fm.getEfeitosPossiveis()) {
+                fmClone.adicionarEfeitoPossivel(ef);
+            }
+            clone.setFichaMaterial(fmClone);
+        }
+
+        clone.setFichaArmaBranca(base.getFichaArmaBranca());
+        clone.setFichaArmaLongoAlcance(base.getFichaArmaLongoAlcance());
+        clone.setFichaArmadura(base.getFichaArmadura());
+        clone.setFichaEscudo(base.getFichaEscudo());
+        clone.setFichaAcessorio(base.getFichaAcessorio());
+        clone.setFichaConsumivel(base.getFichaConsumivel());
+        clone.setFichaGrimorio(base.getFichaGrimorio());
+        clone.setOrigemItem(base.getOrigemItem());
+        clone.setQualidadeCraft(base.getQualidadeCraft());
+        clone.setMonstroOrigem(base.getMonstroOrigem());
+        return clone;
     }
 
     // Getters e Setters
+    public int getNivelLoja() { return nivelLoja; }
+    public void setNivelLoja(int nivelLoja) { this.nivelLoja = Math.max(1, Math.min(5, nivelLoja)); }
+
+    public List<MoldeReceita> getLivroDeReceitas() { return Collections.unmodifiableList(livroDeReceitas); }
+    public void adicionarReceita(MoldeReceita receita) {
+        if (receita != null && !livroDeReceitas.contains(receita)) {
+            livroDeReceitas.add(receita);
+        }
+    }
+
     public String getNome() { return nome; }
     public void setNome(String nome) { this.nome = nome; }
 
@@ -327,8 +469,8 @@ public class Lojas {
     public String toString() {
         String infoRede = lojaDeRede ? " [Rede: " + nomeDaRede + "]" : "";
         String sede = (cidadeSede != null) ? " em " + cidadeSede.getNome() : "";
-        return String.format("%s (%s)%s%s [%s] - %d tipo(s) no estoque | Caixa: %s",
-                nome, mercador, sede, infoRede, tipoEstabelecimento, estoque.size(),
+        return String.format("%s (%s)%s%s [%s | Nv.%d] - %d tipo(s) no estoque | Caixa: %s",
+                nome, mercador, sede, infoRede, tipoEstabelecimento, nivelLoja, estoque.size(),
                 Carteira.formatarLatao(caixa.getValorTotalEmLatao()));
     }
 }

@@ -16,7 +16,8 @@ public class RegistroMovimentacao {
         DESPESA_FRETE("Despesa com Frete"),
         DESPESA_ESCOLTA("Despesa com Escolta Armada"),
         EXTRAVIO_CARGA("Extravio de Carga"),
-        CARGA_RECUPERADA("Carga Recuperada");
+        CARGA_RECUPERADA("Carga Recuperada"),
+        PRODUCAO_CRAFTING("Produção / Crafting");
 
         private final String descricao;
 
