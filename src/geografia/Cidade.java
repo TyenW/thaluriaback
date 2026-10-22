@@ -56,6 +56,27 @@ public class Cidade {
         this.regiaofronteira = fronteira ? regiaofronteira : null;
     }
 
+    private final List<economia.Item> veiosMineraisDisponiveis = new ArrayList<>();
+    private economia.SedeGuildaRegional guildaRegional;
+
+    public void adicionarVeioMineral(economia.Item veio) {
+        if (veio != null && !this.veiosMineraisDisponiveis.contains(veio)) {
+            this.veiosMineraisDisponiveis.add(veio);
+        }
+    }
+
+    public List<economia.Item> getVeiosMineraisDisponiveis() {
+        return Collections.unmodifiableList(veiosMineraisDisponiveis);
+    }
+
+    public economia.SedeGuildaRegional getGuildaRegional() {
+        return guildaRegional;
+    }
+
+    public void setGuildaRegional(economia.SedeGuildaRegional guildaRegional) {
+        this.guildaRegional = guildaRegional;
+    }
+
     // Gerenciamento de Rotas
     public void adicionarConexao(Conexao conexao) {
         if (conexao != null && !this.conexoes.contains(conexao)) {

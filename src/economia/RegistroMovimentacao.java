@@ -17,7 +17,8 @@ public class RegistroMovimentacao {
         DESPESA_ESCOLTA("Despesa com Escolta Armada"),
         EXTRAVIO_CARGA("Extravio de Carga"),
         CARGA_RECUPERADA("Carga Recuperada"),
-        PRODUCAO_CRAFTING("Produção / Crafting");
+        PRODUCAO_CRAFTING("Produção / Crafting"),
+        MANUTENCAO_BASE("Manutenção / Infraestrutura");
 
         private final String descricao;
 

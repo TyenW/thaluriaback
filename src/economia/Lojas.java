@@ -47,6 +47,7 @@ public class Lojas {
     private TipoEstabelecimento tipoEstabelecimento;
     private int nivelLoja = 3; // Nível da oficina (1 a 5), padrão 3 para compatibilidade v3
     private final List<MoldeReceita> livroDeReceitas = new ArrayList<>();
+    private GeradorMineracaoForja geradorMineracao;
 
     // Métricas de Mercado, Oferta e Demanda
     private final Map<Integer, Item> catalogoConhecido = new LinkedHashMap<>();
@@ -85,6 +86,9 @@ public class Lojas {
         this.cidadeSede = cidadeSede;
         if (cidadeSede != null) {
             cidadeSede.adicionarLoja(this);
+        }
+        if (this.tipoEstabelecimento == TipoEstabelecimento.FORJA) {
+            this.geradorMineracao = new GeradorMineracaoForja();
         }
     }
 
@@ -300,22 +304,41 @@ public class Lojas {
 
         if (usandoEstoqueDaLoja) {
             // Coletar do estoque da loja
-            for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
-                if (req.isSlotCatalisadorOpcional()) continue;
-                int aindaNecessario = req.getQuantidade();
-                for (Item item : this.estoque) {
-                    if (item.getFichaMaterial() != null
-                            && item.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()
-                            && item.getFichaMaterial().getQualidade() >= req.getQualidadeMinima()) {
-                        int pegar = Math.min(aindaNecessario, item.getQuantidade());
-                        Item copia = clonarItem(item, pegar);
-                        insumosParaUso.add(copia);
-                        aindaNecessario -= pegar;
-                        if (aindaNecessario <= 0) break;
+            if (!molde.getFiltrosInsumo().isEmpty()) {
+                for (FiltroInsumoReceita filtro : molde.getFiltrosInsumo()) {
+                    if (filtro.isSlotCatalisadorOpcional()) continue;
+                    int aindaNecessario = filtro.getQuantidadeExigida();
+                    for (Item item : this.estoque) {
+                        if (filtro.aceitaMaterial(item)) {
+                            int pegar = Math.min(aindaNecessario, item.getQuantidade());
+                            Item copia = clonarItem(item, pegar);
+                            insumosParaUso.add(copia);
+                            aindaNecessario -= pegar;
+                            if (aindaNecessario <= 0) break;
+                        }
+                    }
+                    if (aindaNecessario > 0) {
+                        return null; // Falta matéria-prima no estoque da loja
                     }
                 }
-                if (aindaNecessario > 0) {
-                    return null; // Falta matéria-prima no estoque da loja
+            } else {
+                for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
+                    if (req.isSlotCatalisadorOpcional()) continue;
+                    int aindaNecessario = req.getQuantidade();
+                    for (Item item : this.estoque) {
+                        if (item.getFichaMaterial() != null
+                                && item.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()
+                                && item.getFichaMaterial().getQualidade() >= req.getQualidadeMinima()) {
+                            int pegar = Math.min(aindaNecessario, item.getQuantidade());
+                            Item copia = clonarItem(item, pegar);
+                            insumosParaUso.add(copia);
+                            aindaNecessario -= pegar;
+                            if (aindaNecessario <= 0) break;
+                        }
+                    }
+                    if (aindaNecessario > 0) {
+                        return null; // Falta matéria-prima no estoque da loja
+                    }
                 }
             }
         } else {
@@ -356,6 +379,11 @@ public class Lojas {
     }
 
     public boolean processarCraftingDiario(int dia, int hora) {
+        // Extração diária de minérios se for Forja com gerador de mineradores ativo
+        if (this.tipoEstabelecimento == TipoEstabelecimento.FORJA && this.geradorMineracao != null && this.cidadeSede != null) {
+            this.geradorMineracao.extrairMineriosDoDia(this, this.cidadeSede.getVeiosMineraisDisponiveis(), dia, hora, new Random());
+        }
+
         boolean fabricouAlgo = false;
         for (MoldeReceita molde : new ArrayList<>(livroDeReceitas)) {
             Item feito = fabricarComMolde(molde, null, dia, hora);
@@ -434,6 +462,9 @@ public class Lojas {
             livroDeReceitas.add(receita);
         }
     }
+
+    public GeradorMineracaoForja getGeradorMineracao() { return geradorMineracao; }
+    public void setGeradorMineracao(GeradorMineracaoForja geradorMineracao) { this.geradorMineracao = geradorMineracao; }
 
     public String getNome() { return nome; }
     public void setNome(String nome) { this.nome = nome; }

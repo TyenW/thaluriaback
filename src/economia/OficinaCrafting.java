@@ -32,6 +32,23 @@ public class OficinaCrafting {
     public static boolean validarInsumos(MoldeReceita molde, List<Item> insumos) {
         if (molde == null || insumos == null) return false;
 
+        if (!molde.getFiltrosInsumo().isEmpty()) {
+            for (FiltroInsumoReceita filtro : molde.getFiltrosInsumo()) {
+                if (filtro.isSlotCatalisadorOpcional()) continue;
+
+                int qtdPresente = 0;
+                for (Item item : insumos) {
+                    if (filtro.aceitaMaterial(item)) {
+                        qtdPresente += item.getQuantidade();
+                    }
+                }
+                if (qtdPresente < filtro.getQuantidadeExigida()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
             if (req.isSlotCatalisadorOpcional()) continue;
 
@@ -124,17 +141,32 @@ public class OficinaCrafting {
 
         // 1. Identificar Material Principal para Nomenclatura e Herança Geográfica
         Item materialPrincipal = null;
-        for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
-            if (req.isDefineSufixoPrincipal()) {
-                for (Item insumo : insumosUsados) {
-                    if (insumo != null && insumo.getFichaMaterial() != null
-                            && insumo.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()) {
-                        materialPrincipal = insumo;
-                        break;
+        if (!molde.getFiltrosInsumo().isEmpty()) {
+            for (FiltroInsumoReceita filtro : molde.getFiltrosInsumo()) {
+                if (filtro.isDefineNomePrincipal()) {
+                    for (Item insumo : insumosUsados) {
+                        if (filtro.aceitaMaterial(insumo)) {
+                            materialPrincipal = insumo;
+                            break;
+                        }
                     }
                 }
+                if (materialPrincipal != null) break;
             }
-            if (materialPrincipal != null) break;
+        }
+        if (materialPrincipal == null) {
+            for (MoldeReceita.RequisitoInsumo req : molde.getRequisitos()) {
+                if (req.isDefineSufixoPrincipal()) {
+                    for (Item insumo : insumosUsados) {
+                        if (insumo != null && insumo.getFichaMaterial() != null
+                                && insumo.getFichaMaterial().getSubtipo() == req.getSubtipoExigido()) {
+                            materialPrincipal = insumo;
+                            break;
+                        }
+                    }
+                }
+                if (materialPrincipal != null) break;
+            }
         }
         if (materialPrincipal == null && !insumosUsados.isEmpty()) {
             materialPrincipal = insumosUsados.get(0);

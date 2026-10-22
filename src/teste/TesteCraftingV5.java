@@ -30,6 +30,10 @@ public class TesteCraftingV5 {
         testarCraftingJoalheriaEPassivas();
         testarCraftingTavernaEBotanicaComRegraDoCamarao();
         testarCadeiaDeSuprimentosAutonomaEMotorEconomico();
+        testarSubsistemasConcretosEModosFiltro();
+        testarGuildaRegionalEAbastecimentoLocal();
+        testarGeologiaMineracaoEGeradorDaForja();
+        testarSistemaDeRequisicoesGuildaEDado20();
 
         System.out.println("\n======================================================================");
         if (testesPassados == totalTestes) {
@@ -387,6 +391,226 @@ public class TesteCraftingV5 {
         boolean temRegistroCrafting = forja.getHistorico().stream()
                 .anyMatch(r -> r.getTipo() == RegistroMovimentacao.TipoOperacao.PRODUCAO_CRAFTING);
         afirme(temRegistroCrafting, "Livro-caixa registrou movimentação do tipo PRODUCAO_CRAFTING");
+    }
+
+    // 9. Bloco 9: Subsistemas de Materiais Concretos (X, Y, Z) e Modos de Filtro
+    private static void testarSubsistemasConcretosEModosFiltro() {
+        System.out.println("\n[9/12] Testando Subsistemas de Materiais Concretos (X, Y, Z) e Filtros de Insumo...");
+
+        Cidade cidade = new Cidade(20, "Floresta Verde", Cidade.TipoAssentamento.CIDADE,
+                Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.RIO, false, false, null);
+        Lojas alfaiataria = new Lojas("Ateliê", "Alfaiate", cidade, false, null, Lojas.TipoEstabelecimento.ALFAIATARIA);
+        alfaiataria.setNivelLoja(3);
+
+        // Materiais Concretos no grupo COURO_PELE Q1
+        // Item X (id: 201) - Couro de Javali
+        Item couroJavaliX = new Item(201, "Couro de Javali", "Couro resistente de floresta", 2.0, 1.0, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 5);
+        couroJavaliX.setFichaMaterial(new FichaMaterial(FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 0, 1, null, true, "de Javali"));
+
+        // Item Y (id: 202) - Couro de Cervo
+        Item couroCervoY = new Item(202, "Couro de Cervo", "Couro macio e flexível", 2.0, 0.8, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 5);
+        couroCervoY.setFichaMaterial(new FichaMaterial(FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 0, 0, null, true, "de Cervo"));
+
+        // Item Z (id: 203) - Couro de Chacal
+        Item couroChacalZ = new Item(203, "Couro de Chacal", "Couro rígido de deserto", 2.0, 0.9, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 5);
+        couroChacalZ.setFichaMaterial(new FichaMaterial(FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 0, 0, null, true, "de Chacal"));
+
+        // Modo 1: ABERTO_SUBSISTEMA (aceita X, Y ou Z)
+        FiltroInsumoReceita filtroAberto = FiltroInsumoReceita.qualquerDoSubsistema(
+                FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 2, true, false);
+        afirme(filtroAberto.aceitaMaterial(couroJavaliX), "Filtro Aberto aceita Item X (Javali)");
+        afirme(filtroAberto.aceitaMaterial(couroCervoY), "Filtro Aberto aceita Item Y (Cervo)");
+        afirme(filtroAberto.aceitaMaterial(couroChacalZ), "Filtro Aberto aceita Item Z (Chacal)");
+
+        MoldeReceita moldeBotas = MoldeReceita.criarMoldeArmadura(120, "Botas de Viagem", Lojas.TipoEstabelecimento.ALFAIATARIA,
+                1, 1.0, TamanhoItem.PEQUENO, 500L, List.of(FichaArmadura.SlotArmadura.PES), 2, 20);
+        moldeBotas.adicionarFiltroInsumo(filtroAberto);
+
+        Item botasComZ = OficinaCrafting.fabricarItem(alfaiataria, moldeBotas, List.of(couroChacalZ), 951);
+        afirme(botasComZ != null, "Botas manufaturadas com sucesso usando Couro de Chacal (Z) em modo aberto");
+
+        // Modo 2: SUBCONJUNTO_RESTRITO (aceita X ou Y; rejeita Z!)
+        FiltroInsumoReceita filtroRestritoXY = FiltroInsumoReceita.apenasEntreOpcoes(
+                FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 2, Set.of(201, 202), true, false);
+        afirme(filtroRestritoXY.aceitaMaterial(couroJavaliX), "Filtro Restrito aceita X (Javali)");
+        afirme(filtroRestritoXY.aceitaMaterial(couroCervoY), "Filtro Restrito aceita Y (Cervo)");
+        afirme(!filtroRestritoXY.aceitaMaterial(couroChacalZ), "Filtro Restrito REJEITA Z (Chacal)!");
+
+        MoldeReceita moldeGibaoFlexivel = MoldeReceita.criarMoldeArmadura(121, "Gibão Flexível", Lojas.TipoEstabelecimento.ALFAIATARIA,
+                1, 2.0, TamanhoItem.MEDIO, 1000L, List.of(FichaArmadura.SlotArmadura.PEITO), 3, 25);
+        moldeGibaoFlexivel.adicionarFiltroInsumo(filtroRestritoXY);
+
+        Item gibaoTentativaInvalida = OficinaCrafting.fabricarItem(alfaiataria, moldeGibaoFlexivel, List.of(couroChacalZ), 952);
+        afirme(gibaoTentativaInvalida == null, "Receita com subconjunto restrito rejeitou fabricar com Couro Z");
+
+        Item gibaoValido = OficinaCrafting.fabricarItem(alfaiataria, moldeGibaoFlexivel, List.of(couroCervoY), 953);
+        afirme(gibaoValido != null, "Receita com subconjunto restrito fabricou com sucesso usando Couro Y (Cervo)");
+
+        // Modo 3: ITEM_EXATO (aceita exclusivamente X; rejeita Y e Z!)
+        FiltroInsumoReceita filtroExatoX = FiltroInsumoReceita.itemEspecificoExato(
+                201, FichaMaterial.SubtipoMaterial.COURO_PELE, 1, 2, true, false);
+        afirme(filtroExatoX.aceitaMaterial(couroJavaliX), "Filtro Exato aceita X (Javali)");
+        afirme(!filtroExatoX.aceitaMaterial(couroCervoY), "Filtro Exato REJEITA Y (Cervo)");
+        afirme(!filtroExatoX.aceitaMaterial(couroChacalZ), "Filtro Exato REJEITA Z (Chacal)");
+
+        MoldeReceita moldeManoplaJavali = MoldeReceita.criarMoldeArmadura(122, "Manopla Farpada", Lojas.TipoEstabelecimento.ALFAIATARIA,
+                1, 1.0, TamanhoItem.PEQUENO, 1200L, List.of(FichaArmadura.SlotArmadura.MAOS), 3, 20);
+        moldeManoplaJavali.adicionarFiltroInsumo(filtroExatoX);
+
+        Item manoplaInvalida = OficinaCrafting.fabricarItem(alfaiataria, moldeManoplaJavali, List.of(couroCervoY), 954);
+        afirme(manoplaInvalida == null, "Receita de item exato rejeitou fabricar com Couro Y");
+
+        Item manoplaValida = OficinaCrafting.fabricarItem(alfaiataria, moldeManoplaJavali, List.of(couroJavaliX), 955);
+        afirme(manoplaValida != null, "Receita de item exato fabricou com sucesso usando exclusivamente Couro X");
+        afirme(manoplaValida.getNome().contains("de Javali"), "Manopla herda o nome do Couro de Javali");
+    }
+
+    // 10. Bloco 10: Guilda Regional e Abastecimento Local (Trava Geográfica)
+    private static void testarGuildaRegionalEAbastecimentoLocal() {
+        System.out.println("\n[10/12] Testando Guilda Regional e Abastecimento por Aventureiros Locais...");
+
+        Cidade sunreach = new Cidade(21, "Sunreach", Cidade.TipoAssentamento.CIDADE,
+                Regiao.DESERTO, Geologia.CAVERNA, Aquifero.OCEANO_AGUAS_PROFUNDAS, false, false, null);
+        SedeGuildaRegional guildaDeserto = new SedeGuildaRegional(sunreach);
+        sunreach.setGuildaRegional(guildaDeserto);
+
+        // Drop local do Deserto
+        Item couroChacal = new Item(203, "Couro de Chacal", "Deserto", 3.0, 1.0, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 4);
+        couroChacal.setOrigemGeografica(Regiao.DESERTO, Geologia.CAVERNA, Aquifero.OCEANO_AGUAS_PROFUNDAS);
+
+        // Drop da Neve/Tundra
+        Item peleLoboNeves = new Item(204, "Pele de Lobo das Neves", "Tundra", 15.0, 2.0, Item.TipoItem.MATERIAL, Item.RaridadeItem.INCOMUM, 2);
+        peleLoboNeves.setOrigemGeografica(Regiao.TUNDRA, Geologia.FLORESTA, Aquifero.RIO);
+
+        afirme(guildaDeserto.itemPertenceAoEcossistemaLocal(couroChacal),
+                "Couro de Chacal pertence ao ecossistema de Sunreach (Deserto/Caverna)");
+        afirme(!guildaDeserto.itemPertenceAoEcossistemaLocal(peleLoboNeves),
+                "Pele de Lobo das Neves NÃO pertence ao ecossistema de Sunreach (Tundra)");
+
+        // Aventureiros locais tentam vender seus saques para a Guilda do Deserto
+        boolean aceitouLocal = guildaDeserto.adicionarItemAventureiroLocal(couroChacal);
+        afirme(aceitouLocal, "Guilda do Deserto aceitou espólio de criatura nativa (Couro de Chacal)");
+        afirme(guildaDeserto.getEstoqueRegional().size() == 1, "Estoque regional da guilda contém 1 item");
+
+        boolean aceitouNeve = guildaDeserto.adicionarItemAventureiroLocal(peleLoboNeves);
+        afirme(!aceitouNeve, "Guilda do Deserto REJEITOU entrada de item da Tundra (Pele de Lobo das Neves)!");
+    }
+
+    // 11. Bloco 11: Geologia de Mineração e Árvore de Mineradores da Forja
+    private static void testarGeologiaMineracaoEGeradorDaForja() {
+        System.out.println("\n[11/12] Testando Geologia de Mineração e Árvore do Gerador do Ferreiro...");
+
+        Cidade ironhold = new Cidade(22, "Ironhold", Cidade.TipoAssentamento.CIDADE,
+                Regiao.TAIGA, Geologia.MONTANHA, Aquifero.RIO, false, false, null);
+
+        // Veios minerais nativos da Montanha
+        Item veioFerro = new Item(301, "Minério de Ferro Bruto", "Ferro", 5.0, 2.0, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 100);
+        veioFerro.setFichaMaterial(new FichaMaterial(FichaMaterial.SubtipoMaterial.MINERIO_BRUTO, 1));
+        ironhold.adicionarVeioMineral(veioFerro);
+
+        Item veioPrata = new Item(302, "Minério de Prata", "Prata Q3", 25.0, 1.5, Item.TipoItem.MATERIAL, Item.RaridadeItem.INCOMUM, 100);
+        veioPrata.setFichaMaterial(new FichaMaterial(FichaMaterial.SubtipoMaterial.MINERIO_BRUTO, 3));
+        ironhold.adicionarVeioMineral(veioPrata);
+
+        Lojas forja = new Lojas("Forja do Pico", "Grimnir", ironhold, false, null, Lojas.TipoEstabelecimento.FORJA);
+        forja.setNivelLoja(3);
+        forja.getCaixa().receberLatao(2_000_000L); // 200 PO
+
+        GeradorMineracaoForja gerador = forja.getGeradorMineracao();
+        afirme(gerador != null, "Forja inicializa com módulo de Gerador de Mineração");
+        afirme(gerador.getNivelAtual() == GeradorMineracaoForja.NivelGeradorMina.NIVEL_0_DESATIVADO,
+                "Gerador inicia no Nível 0 (desativado)");
+
+        // Evolui para Nível 1: Picaretas Alugadas (custo 200.000 latão = 20 PO)
+        boolean evoluiuNv1 = gerador.evoluirGerador(forja, 1, 8);
+        afirme(evoluiuNv1, "Evoluiu para Nível 1 (Picaretas Alugadas)");
+        afirme(gerador.getNivelAtual() == GeradorMineracaoForja.NivelGeradorMina.NIVEL_1_ESCAVADORES, "Nível 1 ativo");
+
+        // Executa extração com fundos no caixa: paga salário diário e extrai minério Q1
+        List<Item> mineriosExtraidos = gerador.extrairMineriosDoDia(forja, ironhold.getVeiosMineraisDisponiveis(), 1, 12, new Random(42));
+        afirme(!mineriosExtraidos.isEmpty(), "Mineradores extraíram minérios no dia com salário pago");
+        afirme(forja.getQuantidadeEstoque(301) > 0, "Minério de Ferro foi adicionado ao estoque da Forja");
+
+        // Simula ferreiro falido (saldo zero) -> Mineradores entram em greve!
+        forja.getCaixa().pagarLatao(forja.getCaixa().getValorTotalEmLatao());
+        List<Item> greveMinerios = gerador.extrairMineriosDoDia(forja, ironhold.getVeiosMineraisDisponiveis(), 2, 8, new Random(42));
+        afirme(greveMinerios.isEmpty(), "Ferreiro sem saldo: mineradores entraram em greve e extração foi 0");
+
+        // Trava de Nível: Forja Nv 3 não pode evoluir gerador para Nível 4 (sonda alquímica exige Forja Nv 4)
+        forja.getCaixa().receberLatao(100_000_000L); // Caixa cheio
+        gerador.evoluirGerador(forja, 2, 10); // Nv 2
+        gerador.evoluirGerador(forja, 2, 11); // Nv 3
+        boolean tentouNv4Invalido = gerador.evoluirGerador(forja, 2, 12);
+        afirme(!tentouNv4Invalido, "Trava de Nível: Forja Nv 3 é impedida de desbloquear Gerador Nv 4");
+    }
+
+    // 12. Bloco 12: Sistema de Requisições na Guilda e Resolução no Dado (1d20)
+    private static void testarSistemaDeRequisicoesGuildaEDado20() {
+        System.out.println("\n[12/12] Testando Sistema de Requisições na Guilda e Resoluções no Dado (1d20)...");
+
+        Cidade portHaven = new Cidade(23, "Port Haven", Cidade.TipoAssentamento.CIDADE,
+                Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null);
+        SedeGuildaRegional guilda = new SedeGuildaRegional(portHaven);
+        portHaven.setGuildaRegional(guilda);
+
+        Lojas taverna = new Lojas("Taverna", "Cozinheiro", portHaven, false, null, Lojas.TipoEstabelecimento.TAVERNA);
+        taverna.getCaixa().receberLatao(500_000L); // 50 PO
+
+        Item camarao = new Item(601, "Camarão da Costa", "Fresco", 2.0, 0.25, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 1);
+        camarao.setOrigemGeografica(Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_COSTEIRAS);
+
+        // A) Requisição bem-sucedida: Nível 1 (Taxa 5k, CD 6, 1 dia)
+        long taxa = RequisicaoGuilda.calcularTaxaFixaNivelEmLatao(1);
+        afirme(taxa == 5_000L, "Taxa fixa de Nível 1 é exatamente 5.000 latão (5 PP)");
+        afirme(RequisicaoGuilda.calcularCdBaseNivel(1) == 6, "CD base de Nível 1 é 6");
+
+        RequisicaoGuilda reqNormal = guilda.abrirRequisicao(taverna, camarao, 4, 20_000L, 1, 8);
+        afirme(reqNormal != null, "Requisição aberta com sucesso na Guilda");
+        afirme(reqNormal.getStatus() == RequisicaoGuilda.StatusRequisicao.EM_EXPEDICAO, "Status inicial é EM_EXPEDICAO");
+
+        // Seed determinística para simular rolagem com sucesso (d20 >= 6)
+        Random rndSucesso = new Random() {
+            @Override public int nextInt(int bound) { return 11; } // Rola 12
+        };
+        reqNormal.avancarDiaEResolver(2, 8, rndSucesso);
+        afirme(reqNormal.getStatus() == RequisicaoGuilda.StatusRequisicao.CONCLUIDA_SUCESSO,
+                "Requisição concluída com SUCESSO (rolou 12 no d20 >= CD 6)");
+        afirme(reqNormal.getQuantidadeEntregue() == 4, "Entregou exatamente 100% da quantidade (4 unidades)");
+
+        // B) Sucesso Crítico (20 Natural): 150% entregue
+        RequisicaoGuilda reqCritica = guilda.abrirRequisicao(taverna, camarao, 4, 20_000L, 2, 8);
+        Random rndCritico = new Random() {
+            @Override public int nextInt(int bound) { return 19; } // Rola 20
+        };
+        reqCritica.avancarDiaEResolver(3, 8, rndCritico);
+        afirme(reqCritica.getStatus() == RequisicaoGuilda.StatusRequisicao.CONCLUIDA_SUCESSO_CRITICO,
+                "Requisição concluída com SUCESSO CRÍTICO (20 Natural no d20)");
+        afirme(reqCritica.getQuantidadeEntregue() == 6, "Sucesso crítico entregou 150% do lote (6 unidades)");
+
+        // C) Sucesso Parcial (CD - 3 <= Total < CD): 50% entregue e 50% de estorno
+        long saldoAntesParcial = taverna.getCaixa().getValorTotalEmLatao();
+        RequisicaoGuilda reqParcial = guilda.abrirRequisicao(taverna, camarao, 4, 40_000L, 3, 8);
+        Random rndParcial = new Random() {
+            @Override public int nextInt(int bound) { return 2; } // Rola 3 (CD 6 - 3 = 3 <= 3 < 6)
+        };
+        reqParcial.avancarDiaEResolver(4, 8, rndParcial);
+        afirme(reqParcial.getStatus() == RequisicaoGuilda.StatusRequisicao.CONCLUIDA_PARCIAL,
+                "Requisição concluída com SUCESSO PARCIAL");
+        afirme(reqParcial.getQuantidadeEntregue() == 2, "Sucesso parcial entregou 50% do lote (2 unidades)");
+
+        // D) Fracasso da Expedição: 0 entregue e 100% do caução estornado
+        long saldoAntesFracasso = taverna.getCaixa().getValorTotalEmLatao();
+        RequisicaoGuilda reqFracasso = guilda.abrirRequisicao(taverna, camarao, 4, 50_000L, 4, 8);
+        Random rndFalha = new Random() {
+            @Override public int nextInt(int bound) { return 0; } // Rola 1 (falha crítica)
+        };
+        reqFracasso.avancarDiaEResolver(5, 8, rndFalha);
+        afirme(reqFracasso.getStatus() == RequisicaoGuilda.StatusRequisicao.FRACASSADA, "Expedição FRACASSOU");
+        afirme(reqFracasso.getQuantidadeEntregue() == 0, "Nenhum item entregue em fracasso");
+        // O caixa perdeu a taxa fixa (5k), mas recuperou os 50.000 da caução
+        long saldoAposFracasso = taverna.getCaixa().getValorTotalEmLatao();
+        afirme(saldoAposFracasso == saldoAntesFracasso - 5_000L,
+                "Apenas a taxa da Guilda foi retida; 100% da caução de recompensa foi estornada");
     }
 
     private static Item criarItemMaterial(int qualidade, Item.RaridadeItem raridade, boolean ehEspolio) {

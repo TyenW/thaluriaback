@@ -237,7 +237,7 @@ A classe [`Ficha.java`](../src/personagem/Ficha.java) agora opera como o centro 
 
 ---
 
-## 7. Garantia de Qualidade e Testes Automatizados (199 Testes)
+## 7. Garantia de Qualidade e Testes Automatizados (240 Testes)
 
 O ecossistema é validado por três suítes automatizadas de testes executadas de forma contínua:
 
@@ -245,8 +245,8 @@ O ecossistema é validado por três suítes automatizadas de testes executadas d
 |---|---|---|:---:|
 | **Suite de Testes E2E (v3)** | [`TesteEndToEnd.java`](../src/teste/TesteEndToEnd.java) | Economia de 10 moedas, 6 lojas, Dijkstra, caravanas, livro-caixa e missões | **69/69 PASSARAM (100%)** |
 | **Suite de Testes Item v4 & v4.1** | [`TesteItemV4.java`](../src/teste/TesteItemV4.java) | Mochila, regra do camarão, 33 armas, 13 slots, escudos, grimórios, QualidadeCraft, Drops e Passivas | **79/79 PASSARAM (100%)** |
-| **Suite de Testes Crafting (v5)** | [`TesteCraftingV5.java`](../src/teste/TesteCraftingV5.java) | MoldeReceita, OficinaCrafting, 5 áreas, 7 qualidades, insumos genéricos vs específicos, cadeia autônoma | **51/51 PASSARAM (100%)** |
-| **TOTAL CONSOLIDADO** | — | **Validação completa de regressão e novas funcionalidades** | **199/199 PASSARAM (100%)** |
+| **Suite de Testes Crafting (v5)** | [`TesteCraftingV5.java`](../src/teste/TesteCraftingV5.java) | MoldeReceita, OficinaCrafting, 5 áreas, 7 qualidades, insumos concretos (X, Y, Z), filtros, gerador da forja, guildas regionais e requisições 1d20 | **92/92 PASSARAM (100%)** |
+| **TOTAL CONSOLIDADO** | — | **Validação completa de regressão e novas funcionalidades** | **240/240 PASSARAM (100%)** |
 
 ---
 
@@ -292,9 +292,9 @@ Quando uma criatura é derrotada, o item dropado herda imediatamente o bioma (`R
 A versão 5 implementa o motor de manufatura completo, unindo matérias-primas e moldes com o sistema econômico autônomo.
 
 ### 9.1. Classes do Núcleo de Crafting
-- **[`MoldeReceita.java`](../src/economia/MoldeReceita.java):** Define os templates para as 5 áreas (`FORJA`, `ALFAIATARIA`, `JOALHERIA`, `TAVERNA`, `BOTANICA`), nível de receita (1 a 5), custo de mão de obra em Latão, e os requisitos de insumo (`RequisitoInsumo`).
+- **[`MoldeReceita.java`](../src/economia/MoldeReceita.java):** Define os templates para as 5 áreas (`FORJA`, `ALFAIATARIA`, `JOALHERIA`, `TAVERNA`, `BOTANICA`), nível de receita (1 a 5), custo de mão de obra em Latão, e os requisitos de insumo (`RequisitoInsumo` e `FiltroInsumoReceita`).
 - **[`OficinaCrafting.java`](../src/economia/OficinaCrafting.java):** Valida ferramentais, consome matérias-primas, calcula a `QualidadeCraft` (1 a 7), aplica bônus de metal/resistência, injeta efeitos nos slots e gera a peça pronta.
-- **[`FichaMaterial.java`](../src/economia/FichaMaterial.java):** Suporta materiais genéricos (ex: *Couro Curtido Q2*) vs. específicos (ex: *Escamas de Dragão*, *Camarão da Costa*), transmitindo nomenclatura e assinaturas geográficas.
+- **[`FichaMaterial.java`](../src/economia/FichaMaterial.java):** Suporta materiais genéricos vs. específicos (ex: *Escamas de Dragão*, *Camarão da Costa*), transmitindo nomenclatura e assinaturas geográficas.
 
 ### 9.2. A Ponte Matemática da Qualidade (1 a 7)
 $$Q_{\text{efetiva}} = \min(\text{nivelLoja} + 1, \; \text{qualidadeMaterial})$$
@@ -309,5 +309,35 @@ $$\text{Grau Final} = \text{clamp}\left(1, \; 7, \; \text{round}(P_{\text{base}}
 1. **Produção Autônoma:** Toda loja possui `nivelLoja` (1 a 5), `livroDeReceitas` e método `processarCraftingDiario(dia, hora)`.
 2. **Auditoria Contábil:** Toda manufatura debita mão de obra do caixa e registra `PRODUCAO_CRAFTING` no histórico com saldo atualizado.
 3. **Cadeia de Suprimentos:** Se faltar matéria-prima na oficina, a loja eleva automaticamente a demanda do insumo; o `MotorEconomico` despacha caravanas intermunicipais via Dijkstra para buscar a matéria-prima em outras cidades, alimentando o ciclo produtivo.
+
+### 9.4. As 4 Restrições Realistas de Economia e Autenticidade (v5)
+
+Para eliminar qualquer atalho artificial ou geração espontânea de itens no mundo, o sistema v5 incorpora quatro subsistemas estritos:
+
+1. **Subsistemas de Materiais Concretos ([`FiltroInsumoReceita.java`](../src/economia/FiltroInsumoReceita.java)):**
+   - Não existem itens abstratos. Todo insumo possui nome, identificador único e origem biológica ou mineral.
+   - Cada slot de molde de receita opera sob um dos três modos de exigência:
+     - **`ABERTO_SUBSISTEMA`:** Aceita qualquer item concreto do mesmo `SubtipoMaterial` com qualidade mínima (ex: `X` Javali, `Y` Cervo ou `Z` Chacal para botas de viagem).
+     - **`SUBCONJUNTO_RESTRITO`:** Aceita apenas um subconjunto de IDs autorizados (ex: aceita `X` ou `Y`, mas rejeita estritamente `Z` para arcos flexíveis).
+     - **`ITEM_EXATO`:** Exige com exclusividade um ID específico (ex: exclusivamente `X` para manopla farpada de javali).
+
+2. **Guilda Regional Vinculada à Cidade ([`SedeGuildaRegional.java`](../src/economia/SedeGuildaRegional.java)):**
+   - Cada cidade possui sua sede local de guilda, abastecida exclusivamente por aventureiros NPCs que caçam nos biomas adjacentes.
+   - Método `itemPertenceAoEcossistemaLocal(Item)`: Aplica trava geográfica absoluta. A Guilda de uma cidade desértica (ex: *Sunreach*) é impedida de aceitar saques de tundra ou ártico (ex: peles de lobo das neves). Itens de outros biomas só entram na cidade por caravanas intermunicipais (via Dijkstra) ou na bagagem de jogadores viajantes.
+
+3. **Geologia de Mineração e Árvore de Mineradores da Forja ([`GeradorMineracaoForja.java`](../src/economia/GeradorMineracaoForja.java)):**
+   - Cidades ricas em minérios (`MONTANHA` / `CAVERNA`) possuem veios minerais nativos (`veiosMineraisDisponiveis` na [`Cidade.java`](../src/geografia/Cidade.java)).
+   - O Ferreiro pode investir no `GeradorMineracaoForja`, evoluindo de **Nv. 0** (*Sem Mineradores*) até **Nv. 5** (*Mestre de Lavra Abissal*).
+   - O nível do gerador é limitado pelo nível da própria Forja.
+   - **Regra de Salários e Greve:** Diariamente, o gerador debita o salário diário dos mineradores do caixa da forja. Se o ferreiro não tiver fundos, ocorre greve e a produção diária é zerada.
+
+4. **Sistema de Requisições na Guilda e Resolução no Dado ([`RequisicaoGuilda.java`](../src/economia/RequisicaoGuilda.java)):**
+   - Quando um insumo nativo da região não está no balcão da guilda, a loja ou jogador abre uma expedição com taxa fixa (5.000 a 500.000 Latão, não reembolsável) e recompensa caucionada.
+   - O prazo varia de 1 a 7 dias conforme o nível da requisição (1 a 5).
+   - Ao zerar o tempo, o sistema rola **`1d20` + bônus de recompensa** contra a CD do nível (CD 6 a 18):
+     - **Sucesso Crítico (20 Natural):** Entrega **150%** da quantidade solicitada com efeito de drop sorteado.
+     - **Sucesso (`Total >= CD`):** Entrega 100% da quantidade encomendada e paga a recompensa.
+     - **Sucesso Parcial com Baixas (`CD - 3 <= Total < CD`):** Entrega 50% do lote solicitado e devolve 50% da caução de recompensa à loja.
+     - **Fracasso (`Total < CD - 3` ou `1 Natural`):** Expedição falha, nenhum item é entregue; a guilda retém a taxa fixa, mas estorna **100% da recompensa caucionada** de volta ao caixa da loja solicitante.
 
 

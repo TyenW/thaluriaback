@@ -48,6 +48,7 @@ public class MoldeReceita {
     private final TamanhoItem tamanhoItem;
     private final long custoMaoDeObraEmLatao;
     private final List<RequisitoInsumo> requisitos = new ArrayList<>();
+    private final List<FiltroInsumoReceita> filtrosInsumo = new ArrayList<>();
 
     // Template para ARMA_BRANCA
     private FichaArmaBranca.SubtipoArmaBranca subtipoArmaBranca;
@@ -104,6 +105,23 @@ public class MoldeReceita {
     public MoldeReceita adicionarRequisito(RequisitoInsumo requisito) {
         if (requisito != null) {
             this.requisitos.add(requisito);
+            this.filtrosInsumo.add(FiltroInsumoReceita.qualquerDoSubsistema(
+                    requisito.getSubtipoExigido(), requisito.getQualidadeMinima(),
+                    requisito.getQuantidade(), requisito.isDefineSufixoPrincipal(),
+                    requisito.isSlotCatalisadorOpcional()
+            ));
+        }
+        return this;
+    }
+
+    public MoldeReceita adicionarFiltroInsumo(FiltroInsumoReceita filtro) {
+        if (filtro != null) {
+            this.filtrosInsumo.add(filtro);
+            this.requisitos.add(new RequisitoInsumo(
+                    filtro.getSubtipoExigido(), filtro.getQuantidadeExigida(),
+                    filtro.getQualidadeMinima(), filtro.isDefineNomePrincipal(),
+                    filtro.isSlotCatalisadorOpcional()
+            ));
         }
         return this;
     }
@@ -111,6 +129,10 @@ public class MoldeReceita {
     public MoldeReceita adicionarRequisito(FichaMaterial.SubtipoMaterial subtipo, int qtd, int qualidadeMin,
                                            boolean principal, boolean opcional) {
         return adicionarRequisito(new RequisitoInsumo(subtipo, qtd, qualidadeMin, principal, opcional));
+    }
+
+    public List<FiltroInsumoReceita> getFiltrosInsumo() {
+        return Collections.unmodifiableList(filtrosInsumo);
     }
 
     // --- MÉTODOS FÁBRICA ESTÁTICOS ---
