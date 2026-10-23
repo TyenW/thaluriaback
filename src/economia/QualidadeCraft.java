@@ -59,6 +59,14 @@ public enum QualidadeCraft {
     public int getReducaoCooldownPassivaTurnos() { return reducaoCooldownPassivaTurnos; }
     public double getMultiplicadorPrecoBase() { return multiplicadorPrecoBase; }
 
+    public static QualidadeCraft doGrau(int grau) {
+        int g = Math.max(1, Math.min(7, grau));
+        for (QualidadeCraft qc : values()) {
+            if (qc.getGrau() == g) return qc;
+        }
+        return PLEBEU;
+    }
+
     @Override
     public String toString() {
         return String.format("%s (Grau %d, x%.2f)", nomeFormatado, grau, multiplicadorAtributosEDano);

@@ -62,6 +62,27 @@ public class SedeGuildaRegional {
         if (!itemPertenceAoEcossistemaLocal(item)) {
             return false;
         }
+        // Regra de Insumos Raros: drops épicos, lendários e míticos não entram sozinhos de aventureiros NPCs comuns
+        if (item.getRaridade() == Item.RaridadeItem.EPICO ||
+            item.getRaridade() == Item.RaridadeItem.LENDARIO ||
+            item.getRaridade() == Item.RaridadeItem.MITICO) {
+            return false;
+        }
+        for (Item existente : estoqueRegional) {
+            if (existente.getId() == item.getId()) {
+                existente.adicionarQuantidade(item.getQuantidade());
+                return true;
+            }
+        }
+        estoqueRegional.add(Lojas.clonarItem(item, item.getQuantidade()));
+        return true;
+    }
+
+    /**
+     * Jogadores podem vender qualquer insumo (incluindo espólios raros de chefes) no balcão da Guilda.
+     */
+    public boolean adicionarItemVendidoPorJogador(Item item) {
+        if (item == null || item.getQuantidade() <= 0) return false;
         for (Item existente : estoqueRegional) {
             if (existente.getId() == item.getId()) {
                 existente.adicionarQuantidade(item.getQuantidade());
@@ -87,6 +108,12 @@ public class SedeGuildaRegional {
 
         int nivel = determinarNivelRequisicao(itemAlvo);
         long taxaFixa = RequisicaoGuilda.calcularTaxaFixaNivelEmLatao(nivel);
+
+        // Talento BARGANHA_AVANCADA: 20% de desconto nas taxas da guilda
+        if (lojaSolicitante.temTalento(TalentoLojista.BARGANHA_AVANCADA)) {
+            taxaFixa = (long) Math.ceil(taxaFixa * 0.80);
+        }
+
         long custoTotal = taxaFixa + recompensaCaucaoLatao;
 
         if (!lojaSolicitante.getCaixa().pagarLatao(custoTotal)) {

@@ -102,6 +102,24 @@ public class MoldeReceita {
         this.custoMaoDeObraEmLatao = Math.max(0L, custoMaoDeObraEmLatao);
     }
 
+    private int diasParaConcluirBase = 0;
+
+    public int getDiasParaConcluirBase() {
+        if (diasParaConcluirBase <= 0) {
+            return switch (tipoItemGerado) {
+                case CONSUMIVEL -> 1;
+                case ARMA_BRANCA, ARMA_LONGO_ALCANCE, ESCUDO -> Math.max(1, nivelReceita);
+                case ARMADURA -> Math.max(2, nivelReceita + 1);
+                default -> Math.max(1, nivelReceita);
+            };
+        }
+        return diasParaConcluirBase;
+    }
+
+    public void setDiasParaConcluirBase(int dias) {
+        this.diasParaConcluirBase = Math.max(1, dias);
+    }
+
     public MoldeReceita adicionarRequisito(RequisitoInsumo requisito) {
         if (requisito != null) {
             this.requisitos.add(requisito);

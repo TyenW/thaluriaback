@@ -1,14 +1,17 @@
-# ☕ Arquitetura Crua do Java: Comércio e Geografia em Grafos
+# 📜 Arquivo Histórico: Arquitetura Crua do Java (Comércio e Geografia)
 
-Este documento detalha **exatamente o que já está implementado em código Java puro** nos pacotes [`src/geografia`](file:///c:/Users/pedro/Desktop/Codigos/rpg/src/geografia) e [`src/economia`](file:///c:/Users/pedro/Desktop/Codigos/rpg/src/economia), analisando as classes, atributos, estruturas de dados, algoritmos embutidos e o fluxo de transações financeiras.
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]
+
+> [!NOTE]
+> **Documento de Registro Histórico:** Este documento preserva a análise técnica original da implementação crua dos pacotes `geografia` e `economia` (v1), registrando os primeiros passos da arquitetura antes da criação das camadas v2, v3, v4, v5 e v6.
 
 ---
 
 ## 🗺️ 1. O Grafo Territorial (`src/geografia`)
 
 O território de Thaluria é modelado matematicamente como um **Grafo Ponderado Bidirecional**:
-* **Vértices ($V$):** Instâncias de [`Cidade.java`](file:///c:/Users/pedro/Desktop/Codigos/rpg/src/geografia/Cidade.java).
-* **Arestas ($E$):** Instâncias de [`Conexao.java`](file:///c:/Users/pedro/Desktop/Codigos/rpg/src/geografia/Conexao.java).
+* **Vértices ($V$):** Instâncias de [`Cidade.java`](../../../src/geografia/Cidade.java).
+* **Arestas ($E$):** Instâncias de [`Conexao.java`](../../../src/geografia/Conexao.java).
 
 ```
    [Cidade A: Frostdale] (Vértice)
@@ -174,9 +177,7 @@ Representa o agente econômico fixado dentro de uma cidade.
 
 ---
 
-## ⚡ 3. Demonstração Prática: Como o Código Opera Hoje
-
-O trecho abaixo exemplifica uma execução real utilizando **apenas o código Java que já existe**:
+## ⚡ 3. Demonstração Prática Histórica
 
 ```java
 // 1. Criando as Cidades (Vértices)
@@ -200,26 +201,17 @@ frostdale.adicionarLoja(empórioNorte);
 // 4. Simulando a Compra por um Personagem
 Carteira carteiraJogador = new Carteira(10, 0, 0); // 10 PO
 boolean comprou = empórioNorte.venderItem(ferro, carteiraJogador);
-
-// Resultado:
-// comprou == true
-// carteiraJogador fica com 5 PO
-// empórioNorte.caixa fica com 55 PO (50 base + 5 da venda)
 ```
 
 ---
 
-## 🔬 4. Resumo das Capacidades e Gaps do Código Atual
+## 🔬 4. Resolução dos Gaps Históricos
 
-### ✅ O Que Já Está 100% Funcional no Código:
-1. **Topologia Básica:** Criação de redes de cidades com adjacências e restrições modais (portos para rotas marítimas).
-2. **Navegação Local:** Uma cidade sabe responder quem são suas vizinhas imediatas e desbloqueadas.
-3. **Algoritmos Utilitários:** Ordenação rápida de cidades por ID (MergeSort) e busca rápida (Busca Binária).
-4. **Matemática Monetária Confiável:** Pagamentos sem erros de arredondamento, cálculo atômico de troco via cobre e conversões de grandeza.
-5. **Comércio Local Atômico:** Comprar e vender itens em uma loja física debitando e creditando carteiras e gerenciando estoques empilháveis.
+Todos os gaps apontados nesta análise preliminar foram resolvidos e integrados nas versões subsequentes:
+- **Dijkstra e Caminhos Mínimos:** Implementado em [`NavegadorGrafo.java`](../../../src/geografia/NavegadorGrafo.java) (v3);
+- **Precificação Dinâmica e Exotismo:** Implementados em [`Lojas.java`](../../../src/economia/Lojas.java) e [`Item.java`](../../../src/economia/Item.java) (v3, v4);
+- **Transporte Físico e Risco:** Implementado em [`Caravana.java`](../../../src/economia/Caravana.java) e [`RotaComercial.java`](../../../src/economia/RotaComercial.java) (v3);
+- **Rede Comercial Ativa e Abastecimento Autônomo:** Implementado em [`MotorEconomico.java`](../../../src/economia/MotorEconomico.java) (v3) e expandido no B2B de atacado (v6).
 
-### ❌ O Que Não Está Implementado no Java (Gaps):
-1. **Nenhum Algoritmo Global de Grafo:** Não existe uma classe que encontre o caminho entre Frostdale e uma cidade a 4 conexões de distância (falta Dijkstra / Busca em Largura).
-2. **Preço Estático:** O preço do `Item` é absoluto (`preco`), não variando se a cidade está no Deserto ou na Floresta.
-3. **Sem Transporte:** A mercadoria não "viaja" pelas arestas; não existe entidade `Caravana` com peso de carga, velocidade e risco de saque.
-4. **Rede Inativa:** Os atributos `lojaDeRede` e `nomeDaRede` em `Lojas` existem como dados cadastrais, mas não possuem métodos para troca de mercadorias entre lojas irmãs.
+---
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]

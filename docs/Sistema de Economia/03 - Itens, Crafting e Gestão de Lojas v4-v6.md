@@ -1,6 +1,8 @@
-# 📦 Arquitetura de Itens e Integração ao Ecossistema — Thaluria RPG (`Item v4`)
+# 📦 03. Itens Táticos, Crafting, Gestão de Lojas e Base v4-v6 — Thaluria RPG
 
-Este documento detalha a estrutura interna da classe [`Item.java`](../src/economia/Item.java) e sua atuação transversal em todo o ecossistema de economia, combate tático, comércio, inventários de aventureiros, simulação autônoma e logística territorial do universo de Thaluria na **Versão 4 (Pré-Crafting Tático)**.
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]
+
+Este documento detalha a estrutura interna da classe [`Item.java`](../../src/economia/Item.java) e sua atuação transversal em todo o ecossistema de economia, combate tático, comércio, inventários de aventureiros, simulação autônoma, manufatura e logística territorial do universo de Thaluria da **Versão 4** até a **Versão 6 (Gestão Avançada de Lojas, Guildas Regionais, Subsistemas Concretos e Propriedades)**.
 
 ---
 
@@ -26,13 +28,31 @@ Este documento detalha a estrutura interna da classe [`Item.java`](../src/econom
    - [4.8. `FichaGrimorio` e `CirculoMagico` (Nível Arcano e Inscrição de Magias)](#48-fichagrimorio-e-circulomagico-nível-arcano-e-inscrição-de-magias)
 5. [Integração com a Ficha do Personagem (`Ficha.java`)](#5-integração-com-a-ficha-do-personagem-fichajava)
 6. [O Item no Ecossistema Global (Lojas, Caravanas e Simulação)](#6-o-item-no-ecossistema-global-lojas-caravanas-e-simulação)
-7. [Garantia de Qualidade e Testes Automatizados (120 Testes)](#7-garantia-de-qualidade-e-testes-automatizados-120-testes)
+7. [Garantia de Qualidade e Testes Automatizados (307 Testes)](#7-garantia-de-qualidade-e-testes-automatizados-307-testes)
+8. [Item v4.1: A Tríade Canônica entre Drops, Crafting e Combate Real](#8-item-v41-a-tríade-canônica-entre-drops-crafting-e-combate-real)
+   - [8.1. Separação Canônica: `RaridadeItem` vs. `QualidadeCraft`](#81-separação-canônica-raridadeitem-vs-qualidadecraft)
+   - [8.2. Matriz Mecânica dos 7 Graus de `QualidadeCraft`](#82-matriz-mecânica-dos-7-graus-de-qualidadecraft)
+   - [8.3. Herança Geográfica de Monstros (`configurarComoDropDeMonstro`)](#83-herança-geográfica-de-monstros-configurarcomodropdemonstro)
+   - [8.4. Passivas Executáveis e Modificadores Reais na `Ficha.java`](#84-passivas-executáveis-e-modificadores-reais-na-fichajava)
+9. [Sistema de Crafting v5: Manufatura Inteligente e Cadeia de Suprimentos](#9-sistema-de-crafting-v5-manufatura-inteligente-e-cadeia-de-suprimentos)
+   - [9.1. Classes do Núcleo de Crafting](#91-classes-do-núcleo-de-crafting)
+   - [9.2. A Ponte Matemática da Qualidade (1 a 7)](#92-a-ponte-matemática-da-qualidade-1-a-7)
+   - [9.3. Integração com Lojas e o Motor Econômico](#93-integração-com-lojas-e-o-motor-econômico)
+   - [9.4. As 4 Restrições Realistas de Economia e Autenticidade (v5)](#94-as-4-restrições-realistas-de-economia-e-autenticidade-v5)
+   - [9.5. Fluxo Integrado de Decisão: Origem, Subsistemas Concretos, Gerador e Resolução no Dado](#95-fluxo-integrado-de-decisão-origem-subsistemas-concretos-gerador-e-resolução-no-dado)
+10. [Camada v6: Gestão Avançada de Lojas, Prateleiras, Roleta de Liquidação, IA Lojista e Base do Jogador](#10-camada-v6-gestão-avançada-de-lojas-prateleiras-roleta-de-liquidação-ia-lojista-e-base-do-jogador)
+    - [10.1. Tempo de Fabricação e Prateleira de Vendas](#101-tempo-de-fabricação-e-prateleira-de-vendas)
+    - [10.2. Comércio B2B Inter-Lojas (Atacado)](#102-comércio-b2b-inter-lojas-atacado)
+    - [10.3. Capacidade Volumétrica e Perecibilidade](#103-capacidade-volumétrica-e-perecibilidade)
+    - [10.4. Árvores de Evolução e Talentos Lojistas](#104-árvores-de-evolução-e-talentos-lojistas)
+    - [10.5. IA Determinística e Catálogo Global de Descobertas](#105-ia-determinística-e-catálogo-global-de-descobertas)
+    - [10.6. Encomendas Especiais e Base do Jogador](#106-encomendas-especiais-e-base-do-jogador)
 
 ---
 
 ## 1. Visão Geral da Arquitetura Modular
 
-A **Versão 4** do sistema de itens adota o princípio de **Composição Modular**. O [`Item.java`](../src/economia/Item.java) permanece como a entidade central universal para todas as operações econômicas, de transporte e inventário, enquanto detalhes táticos e mecânicos específicos são encapsulados em **Fichas Técnicas Dedicadas**:
+A **Versão 4** do sistema de itens adota o princípio de **Composição Modular**. O [`Item.java`](../../src/economia/Item.java) permanece como a entidade central universal para todas as operações econômicas, de transporte e inventário, enquanto detalhes táticos e mecânicos específicos são encapsulados em **Fichas Técnicas Dedicadas**:
 
 ```mermaid
 graph TD
@@ -76,7 +96,7 @@ O enum foi expandido para cobrir todas as funções táticas do jogo, preservand
 
 ### 2.2. Sistema de Tamanho Físico e Volume (`TamanhoItem`)
 
-Além do peso (`double peso` em kg), todo item possui um [`TamanhoItem`](../src/economia/TamanhoItem.java) que define a ocupação volumétrica dentro da mochila:
+Além do peso (`double peso` em kg), todo item possui um [`TamanhoItem`](../../src/economia/TamanhoItem.java) que define a ocupação volumétrica dentro da mochila:
 
 | Enum `TamanhoItem` | Slots Ocupados | Cabe em Mochila Comum? | Exemplos Práticos |
 |---|:---:|:---:|---|
@@ -98,7 +118,7 @@ A classe `Item` armazena opcionalmente sua assinatura geográfica nativa:
 - `Geologia geologiaOrigem`
 - `Aquifero aquiferoOrigem`
 
-Ao ser cotado em uma [`Cidade`](../src/geografia/Cidade.java), o método `calcularMultiplicadorRegional(Cidade)` ajusta o valor dinamicamente:
+Ao ser cotado em uma [`Cidade`](../../src/geografia/Cidade.java), o método `calcularMultiplicadorRegional(Cidade)` ajusta o valor dinamicamente:
 
 1. **Abundância Local (Origem Nativa): Multiplicador `0.80x` (-20%)**
    - Todos os critérios definidos coincidem com a cidade (ex: *Camarão da Costa* em *Porto Oakhaven*, que possui `OCEANO_AGUAS_COSTEIRAS` e porto ativo).
@@ -211,7 +231,7 @@ $$\text{Dano do Disparo} = \text{Dano da Flecha} \times \text{Multiplicador de A
 
 ## 5. Integração com a Ficha do Personagem (`Ficha.java`)
 
-A classe [`Ficha.java`](../src/personagem/Ficha.java) agora opera como o centro de comando de equipamentos do herói:
+A classe [`Ficha.java`](../../src/personagem/Ficha.java) agora opera como o centro de comando de equipamentos do herói:
 
 1. **Validação de Mochila e Carga:**
    - Capacidade de Carga: Baseada em Vigor e Força ($\text{Carga Máx} = 50 + \text{FOR} \times 3 + \text{VIG} \times 2$ kg);
@@ -230,23 +250,24 @@ A classe [`Ficha.java`](../src/personagem/Ficha.java) agora opera como o centro 
 
 ## 6. O Item no Ecossistema Global (Lojas, Caravanas e Simulação)
 
-- **Precificação em [`Lojas.java`](../src/economia/Lojas.java):** O cálculo dinâmico de Latão incorpora o multiplicador regional:
+- **Precificação em [`Lojas.java`](../../src/economia/Lojas.java):** O cálculo dinâmico de Latão incorpora o multiplicador regional:
   $$\text{Preço em Latão} = \text{Preço Base} \times \text{Multiplicador Oferta/Demanda} \times \text{Multiplicador Regional}$$
 - **Clonagem Segura (`Lojas.clonarItem`):** Clona com segurança todas as 8 fichas modulares, garantindo imutabilidade e ausência de efeitos colaterais de memória entre lojistas e aventureiros.
-- **Logística em [`Caravana.java`](../src/economia/Caravana.java):** Cargas continuam utilizando o peso total acumulado para cálculo de frete e risco de emboscada no grafo geográfico de Thaluria.
+- **Logística em [`Caravana.java`](../../src/economia/Caravana.java):** Cargas continuam utilizando o peso total acumulado para cálculo de frete e risco de emboscada no grafo geográfico de Thaluria.
 
 ---
 
-## 7. Garantia de Qualidade e Testes Automatizados (240 Testes)
+## 7. Garantia de Qualidade e Testes Automatizados (307 Testes)
 
-O ecossistema é validado por três suítes automatizadas de testes executadas de forma contínua:
+O ecossistema é validado por quatro suítes automatizadas de testes executadas de forma contínua:
 
 | Suíte de Testes | Arquivo | Cobertura | Status |
 |---|---|---|:---:|
-| **Suite de Testes E2E (v3)** | [`TesteEndToEnd.java`](../src/teste/TesteEndToEnd.java) | Economia de 10 moedas, 6 lojas, Dijkstra, caravanas, livro-caixa e missões | **69/69 PASSARAM (100%)** |
-| **Suite de Testes Item v4 & v4.1** | [`TesteItemV4.java`](../src/teste/TesteItemV4.java) | Mochila, regra do camarão, 33 armas, 13 slots, escudos, grimórios, QualidadeCraft, Drops e Passivas | **79/79 PASSARAM (100%)** |
-| **Suite de Testes Crafting (v5)** | [`TesteCraftingV5.java`](../src/teste/TesteCraftingV5.java) | MoldeReceita, OficinaCrafting, 5 áreas, 7 qualidades, insumos concretos (X, Y, Z), filtros, gerador da forja, guildas regionais e requisições 1d20 | **92/92 PASSARAM (100%)** |
-| **TOTAL CONSOLIDADO** | — | **Validação completa de regressão e novas funcionalidades** | **240/240 PASSARAM (100%)** |
+| **Suite de Testes E2E (v3)** | [`TesteEndToEnd.java`](../../src/teste/TesteEndToEnd.java) | Economia de 10 moedas, 6 lojas, Dijkstra, caravanas, livro-caixa e missões | **69/69 PASSARAM (100%)** |
+| **Suite de Testes Item v4 & v4.1** | [`TesteItemV4.java`](../../src/teste/TesteItemV4.java) | Mochila, regra do camarão, 33 armas, 13 slots, escudos, grimórios, QualidadeCraft, Drops e Passivas | **79/79 PASSARAM (100%)** |
+| **Suite de Testes Crafting (v5)** | [`TesteCraftingV5.java`](../../src/teste/TesteCraftingV5.java) | MoldeReceita, OficinaCrafting, 5 áreas, 7 qualidades, insumos concretos (X, Y, Z), filtros, gerador da forja, guildas regionais e requisições 1d20 | **92/92 PASSARAM (100%)** |
+| **Suite de Testes Gestão de Lojas (v6)** | [`TesteGestaoLojasV6.java`](../../src/teste/TesteGestaoLojasV6.java) | OrdemProducao em dias de mesa, Roleta de Liquidação (1d100), B2B atacado, validade orgânica e apodrecimento, câmara de conservação, árvores de melhoria e talentos, IA IRD determinística, contratos urgentes (+50%) e Base do Jogador com estufa climatizada | **67/67 PASSARAM (100%)** |
+| **TOTAL CONSOLIDADO** | — | **Validação completa e irrestrita de todo o ecossistema econômico** | **307/307 PASSARAM (100%)** |
 
 ---
 
@@ -292,9 +313,9 @@ Quando uma criatura é derrotada, o item dropado herda imediatamente o bioma (`R
 A versão 5 implementa o motor de manufatura completo, unindo matérias-primas e moldes com o sistema econômico autônomo.
 
 ### 9.1. Classes do Núcleo de Crafting
-- **[`MoldeReceita.java`](../src/economia/MoldeReceita.java):** Define os templates para as 5 áreas (`FORJA`, `ALFAIATARIA`, `JOALHERIA`, `TAVERNA`, `BOTANICA`), nível de receita (1 a 5), custo de mão de obra em Latão, e os requisitos de insumo (`RequisitoInsumo` e `FiltroInsumoReceita`).
-- **[`OficinaCrafting.java`](../src/economia/OficinaCrafting.java):** Valida ferramentais, consome matérias-primas, calcula a `QualidadeCraft` (1 a 7), aplica bônus de metal/resistência, injeta efeitos nos slots e gera a peça pronta.
-- **[`FichaMaterial.java`](../src/economia/FichaMaterial.java):** Suporta materiais genéricos vs. específicos (ex: *Escamas de Dragão*, *Camarão da Costa*), transmitindo nomenclatura e assinaturas geográficas.
+- **[`MoldeReceita.java`](../../src/economia/MoldeReceita.java):** Define os templates para as 5 áreas (`FORJA`, `ALFAIATARIA`, `JOALHERIA`, `TAVERNA`, `BOTANICA`), nível de receita (1 a 5), custo de mão de obra em Latão, e os requisitos de insumo (`RequisitoInsumo` e `FiltroInsumoReceita`).
+- **[`OficinaCrafting.java`](../../src/economia/OficinaCrafting.java):** Valida ferramentais, consome matérias-primas, calcula a `QualidadeCraft` (1 a 7), aplica bônus de metal/resistência, injeta efeitos nos slots e gera a peça pronta.
+- **[`FichaMaterial.java`](../../src/economia/FichaMaterial.java):** Suporta materiais genéricos vs. específicos (ex: *Escamas de Dragão*, *Camarão da Costa*), transmitindo nomenclatura e assinaturas geográficas.
 
 ### 9.2. A Ponte Matemática da Qualidade (1 a 7)
 $$Q_{\text{efetiva}} = \min(\text{nivelLoja} + 1, \; \text{qualidadeMaterial})$$
@@ -314,24 +335,24 @@ $$\text{Grau Final} = \text{clamp}\left(1, \; 7, \; \text{round}(P_{\text{base}}
 
 Para eliminar qualquer atalho artificial ou geração espontânea de itens no mundo, o sistema v5 incorpora quatro subsistemas estritos:
 
-1. **Subsistemas de Materiais Concretos ([`FiltroInsumoReceita.java`](../src/economia/FiltroInsumoReceita.java)):**
+1. **Subsistemas de Materiais Concretos ([`FiltroInsumoReceita.java`](../../src/economia/FiltroInsumoReceita.java)):**
    - Não existem itens abstratos. Todo insumo possui nome, identificador único e origem biológica ou mineral.
    - Cada slot de molde de receita opera sob um dos três modos de exigência:
      - **`ABERTO_SUBSISTEMA`:** Aceita qualquer item concreto do mesmo `SubtipoMaterial` com qualidade mínima (ex: `X` Javali, `Y` Cervo ou `Z` Chacal para botas de viagem).
      - **`SUBCONJUNTO_RESTRITO`:** Aceita apenas um subconjunto de IDs autorizados (ex: aceita `X` ou `Y`, mas rejeita estritamente `Z` para arcos flexíveis).
      - **`ITEM_EXATO`:** Exige com exclusividade um ID específico (ex: exclusivamente `X` para manopla farpada de javali).
 
-2. **Guilda Regional Vinculada à Cidade ([`SedeGuildaRegional.java`](../src/economia/SedeGuildaRegional.java)):**
+2. **Guilda Regional Vinculada à Cidade ([`SedeGuildaRegional.java`](../../src/economia/SedeGuildaRegional.java)):**
    - Cada cidade possui sua sede local de guilda, abastecida exclusivamente por aventureiros NPCs que caçam nos biomas adjacentes.
    - Método `itemPertenceAoEcossistemaLocal(Item)`: Aplica trava geográfica absoluta. A Guilda de uma cidade desértica (ex: *Sunreach*) é impedida de aceitar saques de tundra ou ártico (ex: peles de lobo das neves). Itens de outros biomas só entram na cidade por caravanas intermunicipais (via Dijkstra) ou na bagagem de jogadores viajantes.
 
-3. **Geologia de Mineração e Árvore de Mineradores da Forja ([`GeradorMineracaoForja.java`](../src/economia/GeradorMineracaoForja.java)):**
-   - Cidades ricas em minérios (`MONTANHA` / `CAVERNA`) possuem veios minerais nativos (`veiosMineraisDisponiveis` na [`Cidade.java`](../src/geografia/Cidade.java)).
+3. **Geologia de Mineração e Árvore de Mineradores da Forja ([`GeradorMineracaoForja.java`](../../src/economia/GeradorMineracaoForja.java)):**
+   - Cidades ricas em minérios (`MONTANHA` / `CAVERNA`) possuem veios minerais nativos (`veiosMineraisDisponiveis` na [`Cidade.java`](../../src/geografia/Cidade.java)).
    - O Ferreiro pode investir no `GeradorMineracaoForja`, evoluindo de **Nv. 0** (*Sem Mineradores*) até **Nv. 5** (*Mestre de Lavra Abissal*).
    - O nível do gerador é limitado pelo nível da própria Forja.
    - **Regra de Salários e Greve:** Diariamente, o gerador debita o salário diário dos mineradores do caixa da forja. Se o ferreiro não tiver fundos, ocorre greve e a produção diária é zerada.
 
-4. **Sistema de Requisições na Guilda e Resolução no Dado ([`RequisicaoGuilda.java`](../src/economia/RequisicaoGuilda.java)):**
+4. **Sistema de Requisições na Guilda e Resolução no Dado ([`RequisicaoGuilda.java`](../../src/economia/RequisicaoGuilda.java)):**
    - Quando um insumo nativo da região não está no balcão da guilda, a loja ou jogador abre uma expedição com taxa fixa (5.000 a 500.000 Latão, não reembolsável) e recompensa caucionada.
    - O prazo varia de 1 a 7 dias conforme o nível da requisição (1 a 5).
    - Ao zerar o tempo, o sistema rola **`1d20` + bônus de recompensa** contra a CD do nível (CD 6 a 18):
@@ -340,4 +361,110 @@ Para eliminar qualquer atalho artificial ou geração espontânea de itens no mu
      - **Sucesso Parcial com Baixas (`CD - 3 <= Total < CD`):** Entrega 50% do lote solicitado e devolve 50% da caução de recompensa à loja.
      - **Fracasso (`Total < CD - 3` ou `1 Natural`):** Expedição falha, nenhum item é entregue; a guilda retém a taxa fixa, mas estorna **100% da recompensa caucionada** de volta ao caixa da loja solicitante.
 
+### 9.5. Fluxo Integrado de Decisão: Origem, Subsistemas Concretos, Gerador e Resolução no Dado
 
+```mermaid
+flowchart TD
+    Inicio["Demanda de Insumo por Loja ou Jogador"] --> AvaliaOrigem{"Insumo é Nativo do Bioma/Geologia Local?"}
+
+    AvaliaOrigem -- "Não (ex: Sunreach precisa de Urso da Tundra)" --> BloqueioGuilda["Guilda e Caçadores Locais Bloqueados"]
+    BloqueioGuilda --> OpcoesImportacao{"Via de Entrada na Cidade"}
+    OpcoesImportacao -- "Comércio Intermunicipal" --> CaravanaDijkstra["Caravana Intermunicipal (Dijkstra) + Frete/Escolta + Regra do Camarão"]
+    OpcoesImportacao -- "Jogadores" --> JogadorViajante["Jogador Viaja, Caça e Vende no Balcão"]
+    CaravanaDijkstra --> ChegadaEstoque["Insumo Concreto no Estoque (X, Y ou Z)"]
+    JogadorViajante --> ChegadaEstoque
+
+    AvaliaOrigem -- "Sim (Nativo da Região)" --> TipoInsumo{"Tipo do Insumo"}
+
+    TipoInsumo -- "Minério / Veio Geológico" --> ChecaForja{"É uma FORJA com Gerador?"}
+    ChecaForja -- "Sim (GeradorMineracaoForja)" --> ChecaCaixaMinerador{"Caixa Paga Diária dos Mineradores?"}
+    ChecaCaixaMinerador -- "Não (Falta Latão)" --> GreveMineracao["Greve dos Mineradores (Extração = 0)"]
+    GreveMineracao --> TentaGuildaBalcao
+    ChecaCaixaMinerador -- "Sim (Salário Pago)" --> ExtracaoDiaria["Extração Diária de Veios da Cidade (Nível 0 a 5)"]
+    ExtracaoDiaria --> ChegadaEstoque
+
+    ChecaForja -- "Não (Outro Estabelecimento)" --> TentaGuildaBalcao["Consulta Balcão da SedeGuildaRegional"]
+
+    TipoInsumo -- "Espólio / Fauna / Flora" --> TentaGuildaBalcao
+    TentaGuildaBalcao --> TemProntaEntrega{"Tem Pronta-Entrega na Guilda?"}
+    TemProntaEntrega -- "Sim" --> CompraBalcao["Compra Imediata com Latão"]
+    CompraBalcao --> ChegadaEstoque
+
+    TemProntaEntrega -- "Não" --> AbreRequisicao["Abre RequisicaoGuilda (Nível 1 a 5)"]
+    AbreRequisicao --> PagaTaxas["Paga Taxa Fixa Não-Reembolsável + Caução de Recompensa"]
+    PagaTaxas --> ContagemDias["Expedição em Andamento (1 a 7 Dias)"]
+    ContagemDias --> RolaD20["Fim do Prazo: Rola 1d20 + Bônus de Recompensa vs CD"]
+
+    RolaD20 --> ResultadoDado{"Resultado do Teste"}
+    ResultadoDado -- "20 Natural" --> SucessoCritico["Sucesso Crítico: Entrega 150% do Lote + Efeito Sorteado"]
+    ResultadoDado -- "Total >= CD" --> SucessoNormal["Sucesso: Entrega 100% do Lote + Paga Recompensa"]
+    ResultadoDado -- "CD - 3 <= Total < CD" --> SucessoParcial["Sucesso Parcial: Entrega 50% do Lote + Estorna 50% Caução"]
+    ResultadoDado -- "Total < CD - 3 ou 1 Natural" --> FracassoExpedicao["Fracasso: 0% Entregue + Estorna 100% Caução (Perde Taxa)"]
+
+    SucessoCritico --> ChegadaEstoque
+    SucessoNormal --> ChegadaEstoque
+    SucessoParcial --> ChegadaEstoque
+
+    ChegadaEstoque --> AvaliaFiltro{"FiltroInsumoReceita no MoldeReceita"}
+    AvaliaFiltro -- "ABERTO_SUBSISTEMA" --> AceitaAberto["Aceita X, Y ou Z (Qualquer do Subtipo com Q >= min)"]
+    AvaliaFiltro -- "SUBCONJUNTO_RESTRITO" --> AvaliaSubconjunto{"Item está no Set Permitido (ex: X ou Y)?"}
+    AvaliaSubconjunto -- "Sim (X ou Y)" --> AceitoRestrito["Aceita Insumo"]
+    AvaliaSubconjunto -- "Não (Z)" --> RejeitaRestrito["Rejeita Insumo no Slot"]
+
+    AvaliaFiltro -- "ITEM_EXATO" --> AvaliaExato{"ID é o Obrigatório (ex: apenas X)?"}
+    AvaliaExato -- "Sim (X)" --> AceitoExato["Aceita Insumo"]
+    AvaliaExato -- "Não (Y ou Z)" --> RejeitaExato["Rejeita Insumo no Slot"]
+
+    AceitaAberto --> ManufaturaOficina["OficinaCrafting (Cálculo QualidadeCraft 1-7, Herança de Nome, Livro-Caixa)"]
+    AceitoRestrito --> ManufaturaOficina
+    AceitoExato --> ManufaturaOficina
+```
+
+---
+
+## 10. Camada v6: Gestão Avançada de Lojas, Prateleiras, Roleta de Liquidação, IA Lojista e Base do Jogador
+
+A **Versão 6** expande o ecossistema de manufatura e comércio, eliminando a fabricação instantânea e estoques estáticos em favor de um ecossistema com tempo de produção em dias de mesa, encalhe de prateleira, liquidação, deterioração de orgânicos, árvores de melhoria e gestão de propriedades de aventureiros.
+
+### 10.1. Tempo de Fabricação e Prateleira de Vendas
+- **[`OrdemProducao.java`](../../src/economia/OrdemProducao.java):** Toda manufatura passa a exigir dias de mesa (`diasParaConcluirBase`). Os insumos e a mão de obra são debitados no ato da encomenda; a peça avança na `filaProducao` da loja e só ingressa na prateleira de vendas ao atingir 0 dias restantes.
+- **[`LotePrateleira.java`](../../src/economia/LotePrateleira.java):** Gerencia os itens prontos expostos para venda. Rastreia o contador `diasEncalhado`. Quando o lote atinge `limiteDiasPrateleira` (padrão 7 dias), aciona a **Roleta de Liquidação (`1d100`)**:
+  - **`86 a 100` (Lucro Extra Colecionador):** Vendido por **`1.40x`** do preço base;
+  - **`51 a 85` (Venda Normal):** Vendido pelo valor de tabela (**`1.00x`**);
+  - **`16 a 50` (Queima de Estoque):** Liquidado com desconto agressivo (**`0.55x`**) para liberar capital de giro;
+  - **`1 a 15` (Encalhe Crítico):** Se a loja tiver o talento `RECICLAGEM_DE_SUCATA`, recupera **30% dos insumos** de volta ao armazém; caso contrário, é vendido como sucata a **`0.20x`**.
+
+### 10.2. Comércio B2B Inter-Lojas (Atacado)
+- No ciclo diário, estabelecimentos do tipo `LOJA_GERAL` examinam as prateleiras das oficinas especializadas da cidade (`FORJA`, `ALFAIATARIA`, `ALQUIMIA`, `BOTANICA`, `JOALHERIA`, `TAVERNA`) e compram produtos acabados com **15% de desconto de atacado (`0.85x`)** para abastecer seus balcões aos aventureiros.
+
+### 10.3. Capacidade Volumétrica e Perecibilidade
+- **Limites Físicos:** As lojas possuem limites efetivos de armazém (`50 slots`) e prateleira (`30 slots`), calculados pela volumetria real dos itens (`TamanhoItem.getSlotsMochila()`). Ao lotar, a loja força liquidação imediata.
+- **Validade Orgânica ([`Item.java`](../../src/economia/Item.java)):** Alimentos, carnes frescas e ervas medicinais possuem `perecivel = true` e `diasValidadeRestantes`. Ao vencerem no armazém, apodrecem e geram o lançamento contábil `PERDA_DETERIORACAO` no Livro-Caixa.
+
+### 10.4. Árvores de Evolução e Talentos Lojistas
+- **[`ArvoreEvolucaoLoja.java`](../../src/economia/ArvoreEvolucaoLoja.java):** Estrutura física da loja evoluída com fundos de caixa:
+  - `EXPANSAO_ARMAZEM` (+30 slots de estoque);
+  - `EXPANSAO_PRATELEIRA` (+20 slots de exposição);
+  - `BANCADAS_ADICIONAIS` (+2 ordens simultâneas de produção);
+  - `ESTUFA_CLIMATIZADA` (cultivo botânico autônomo sem restrição de clima/bioma);
+  - `FORNO_ALTA_TEMPERATURA` (fundição avançada com bônus de qualidade);
+  - `LABORATORIO_DESTILACAO` (acelera produção de poções e fermentação em 50%);
+  - `CAMARA_CONSERVACAO` (triplica a validade de todos os perecíveis armazenados).
+- **[`TalentoLojista.java`](../../src/economia/TalentoLojista.java):** Habilidades passivas do mestre artesão:
+  - `BARGANHA_AVANCADA` (20% de desconto nas taxas da Guilda Comercial);
+  - `MESTRE_ARTESAO` (Gera itens **Obra-Prima** vendidos por **`3x` o valor base**);
+  - `PRODUCAO_EM_MASSA` (Reduz tempo de fabricação em 25%, com penalidade de -1 grau de qualidade);
+  - `RECICLAGEM_DE_SUCATA` (Desmonta peças encalhadas recuperando 30% dos insumos).
+
+### 10.5. IA Determinística e Catálogo Global de Descobertas
+- **[`CatalogoGlobalDescobertas.java`](../../src/economia/CatalogoGlobalDescobertas.java):** Fórmulas raras e espécimes botânicos iniciam ocultos e são destravados no mercado global conforme os jogadores exploram o mundo.
+- **[`IALojistaDeterministica.java`](../../src/economia/IALojistaDeterministica.java):** Algoritmo não-generativo que calcula o Índice de Rentabilidade Diária ($\text{IRD}$):
+$$\text{IRD}(\text{Receita}) = \frac{\text{Preço de Venda Esperado} - \text{Custo dos Insumos} - \text{Mão de Obra}}{\text{Dias de Produção}}$$
+Insumos perecíveis prestes a vencer recebem prioridade máxima de produção para evitar prejuízo por descarte contábil. A IA reavalia suas decisões na mesma hora em que novas receitas são registradas no catálogo.
+
+### 10.6. Encomendas Especiais e Base do Jogador
+- **[`ContratoEncomenda.java`](../../src/economia/ContratoEncomenda.java):** Encomendas urgentes da nobreza que pagam **`+50%` de bônus**. Se a oficina não possuir os insumos a tempo, pode terceirizar a coleta aos jogadores em troca de uma fatia do lucro.
+- **[`BaseJogador.java`](../../src/economia/BaseJogador.java) e [`EstufaCultivo.java`](../../src/economia/EstufaCultivo.java):** Propriedade e quartel-general dos aventureiros com progressão de 5 níveis (*Terreno* $\to$ *Acampamento* $\to$ *Feitoria* $\to$ *Bastião* $\to$ *Complexo* $\to$ *Cidadela*) com custos altos em Latão, Platina, Cobalto, Diamante e Talento. Suporta canteiros botânicos com estufa climatizada para cultivo de qualquer espécie vegetal.
+
+---
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]

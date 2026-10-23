@@ -49,6 +49,16 @@ public class Lojas {
     private final List<MoldeReceita> livroDeReceitas = new ArrayList<>();
     private GeradorMineracaoForja geradorMineracao;
 
+    // V6: Gestão Avançada de Lojas, Prateleiras, Fila de Produção e Talentos
+    private final ArvoreEvolucaoLoja arvoreEvolucao = new ArvoreEvolucaoLoja();
+    private final Set<TalentoLojista> talentos = new LinkedHashSet<>();
+    private final List<OrdemProducao> filaProducao = new ArrayList<>();
+    private final List<LotePrateleira> lotesPrateleira = new ArrayList<>();
+    private int capacidadeSlotsArmazemBase = 50;
+    private int capacidadeSlotsPrateleiraBase = 30;
+    private int proximoIdOrdem = 1;
+    private int contadorDiasCamaraConservacao = 0;
+
     // Métricas de Mercado, Oferta e Demanda
     private final Map<Integer, Item> catalogoConhecido = new LinkedHashMap<>();
     private final Map<Integer, Integer> demandaPorItem = new LinkedHashMap<>();
@@ -127,6 +137,10 @@ public class Lojas {
             }
         }
         return false;
+    }
+
+    public boolean removerItem(int idItem, int qtd) {
+        return removerUnidades(idItem, qtd);
     }
 
     public int getQuantidadeEstoque(int idItem) {
@@ -449,6 +463,10 @@ public class Lojas {
         clone.setOrigemItem(base.getOrigemItem());
         clone.setQualidadeCraft(base.getQualidadeCraft());
         clone.setMonstroOrigem(base.getMonstroOrigem());
+        clone.setObraPrima(base.isObraPrima());
+        clone.setPerecivel(base.isPerecivel());
+        clone.setDiasValidadeRestantes(base.getDiasValidadeRestantes());
+        clone.setDiasValidadeMaximo(base.getDiasValidadeMaximo());
         return clone;
     }
 
@@ -495,6 +513,205 @@ public class Lojas {
     public Map<Integer, Integer> getEntradasRecentes() { return Collections.unmodifiableMap(entradasRecentes); }
     public Map<Integer, Integer> getSaidasRecentes() { return Collections.unmodifiableMap(saidasRecentes); }
     public List<RegistroMovimentacao> getHistorico() { return Collections.unmodifiableList(historico); }
+
+    // =========================================================================
+    // MÉTODOS DE GESTÃO AVANÇADA v6 (PRATELEIRA, B2B, ORDENS E DETERIORAÇÃO)
+    // =========================================================================
+
+    public ArvoreEvolucaoLoja getArvoreEvolucao() { return arvoreEvolucao; }
+
+    public void adicionarTalento(TalentoLojista talento) {
+        if (talento != null) talentos.add(talento);
+    }
+
+    public boolean temTalento(TalentoLojista talento) {
+        return talentos.contains(talento);
+    }
+
+    public Set<TalentoLojista> getTalentos() {
+        return Collections.unmodifiableSet(talentos);
+    }
+
+    public int getCapacidadeSlotsArmazemEfetiva() {
+        return capacidadeSlotsArmazemBase + arvoreEvolucao.getBonusSlotsArmazem();
+    }
+
+    public int getCapacidadeSlotsPrateleiraEfetiva() {
+        return capacidadeSlotsPrateleiraBase + arvoreEvolucao.getBonusSlotsPrateleira();
+    }
+
+    public double calcularEspacoArmazemOcupado() {
+        double espaco = 0.0;
+        for (Item it : estoque) {
+            espaco += it.getEspacoTotal();
+        }
+        return espaco;
+    }
+
+    public double calcularEspacoPrateleiraOcupado() {
+        double espaco = 0.0;
+        for (LotePrateleira lote : lotesPrateleira) {
+            if (lote.getItem() != null) {
+                espaco += (lote.getItem().getTamanho() != null ? lote.getItem().getTamanho().getSlotsMochila() : 1.0) * lote.getQuantidade();
+            }
+        }
+        return espaco;
+    }
+
+    public boolean isArmazemLotado() {
+        return calcularEspacoArmazemOcupado() >= getCapacidadeSlotsArmazemEfetiva();
+    }
+
+    public boolean isPrateleiraLotada() {
+        return calcularEspacoPrateleiraOcupado() >= getCapacidadeSlotsPrateleiraEfetiva();
+    }
+
+    public void adicionarItemProntoPrateleira(Item itemPronto) {
+        if (itemPronto == null) return;
+        adicionarItem(itemPronto);
+        lotesPrateleira.add(new LotePrateleira(clonarItem(itemPronto, itemPronto.getQuantidade()), itemPronto.getQuantidade()));
+    }
+
+    public List<LotePrateleira> getLotesPrateleira() {
+        return Collections.unmodifiableList(lotesPrateleira);
+    }
+
+    public List<OrdemProducao> getFilaProducao() {
+        return Collections.unmodifiableList(filaProducao);
+    }
+
+    public boolean iniciarOrdemProducao(MoldeReceita molde, int dia, int hora) {
+        if (molde == null) return false;
+        if (nivelLoja < molde.getNivelReceita()) return false;
+
+        int maxOrdens = 1 + arvoreEvolucao.getBonusOrdensSimultaneas();
+        if (filaProducao.size() >= maxOrdens) return false;
+
+        // Verifica fundos para mão de obra
+        if (!caixa.pagarLatao(molde.getCustoMaoDeObraEmLatao())) {
+            return false;
+        }
+
+        // Verifica materiais
+        List<Item> consumidos = new ArrayList<>();
+        for (FiltroInsumoReceita filtro : molde.getFiltrosInsumo()) {
+            Item selecionado = null;
+            for (Item cand : estoque) {
+                if (filtro.aceitaMaterial(cand) && cand.getQuantidade() >= filtro.getQuantidadeExigida()) {
+                    selecionado = cand;
+                    break;
+                }
+            }
+            if (selecionado == null && !filtro.isSlotCatalisadorOpcional()) {
+                caixa.receberLatao(molde.getCustoMaoDeObraEmLatao());
+                return false;
+            }
+            if (selecionado != null) {
+                removerItem(selecionado.getId(), filtro.getQuantidadeExigida());
+                consumidos.add(clonarItem(selecionado, filtro.getQuantidadeExigida()));
+            }
+        }
+
+        int idResultado = molde.getIdMolde() * 100 + proximoIdOrdem;
+        OrdemProducao ordem = new OrdemProducao(proximoIdOrdem++, this, molde, consumidos, idResultado);
+        filaProducao.add(ordem);
+        return true;
+    }
+
+    public void processarDeterioracaoInsumos(int dia, int hora) {
+        boolean desacelerar = arvoreEvolucao.isCamaraConservacaoAtiva();
+        if (desacelerar) {
+            contadorDiasCamaraConservacao++;
+            if (contadorDiasCamaraConservacao % 3 != 0) {
+                return;
+            }
+        }
+
+        Iterator<Item> it = estoque.iterator();
+        while (it.hasNext()) {
+            Item item = it.next();
+            if (item.isPerecivel()) {
+                boolean apodreceu = item.avancarDiaValidade();
+                if (apodreceu) {
+                    long valorPerda = item.getValorTotalEmLatao();
+                    it.remove();
+                    registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PERDA_DETERIORACAO,
+                            item.getNome(), item.getQuantidade(), valorPerda,
+                            "Material orgânico apodreceu no armazém por expiração de validade");
+                }
+            }
+        }
+    }
+
+    public void processarFilaProducao(int dia, int hora) {
+        Iterator<OrdemProducao> it = filaProducao.iterator();
+        while (it.hasNext()) {
+            OrdemProducao ordem = it.next();
+            boolean concluiu = ordem.avancarDia(dia, hora);
+            if (concluiu) {
+                it.remove();
+            }
+        }
+    }
+
+    public void processarPrateleiraERoleta(int dia, int hora, Random random) {
+        Iterator<LotePrateleira> it = lotesPrateleira.iterator();
+        while (it.hasNext()) {
+            LotePrateleira lote = it.next();
+            boolean liquidou = lote.avancarDiaEResolver(this, dia, hora, random);
+            if (liquidou || lote.isVendidoOuLiquidado()) {
+                it.remove();
+            }
+        }
+    }
+
+    public void executarComprasB2B(List<Lojas> lojasDaCidade, int dia, int hora) {
+        if (this.tipoEstabelecimento != TipoEstabelecimento.LOJA_GERAL || lojasDaCidade == null) {
+            return;
+        }
+
+        for (Lojas especializada : lojasDaCidade) {
+            if (especializada == this) continue;
+
+            for (Item itemVenda : new ArrayList<>(especializada.getEstoque())) {
+                if (itemVenda.getTipo() == Item.TipoItem.MATERIAL) continue;
+                if (itemVenda.getQuantidade() < 2) continue;
+
+                long precoVendaNormal = especializada.calcularPrecoDinamicoVendaEmLatao(itemVenda);
+                long precoAtacado = (long) Math.floor(precoVendaNormal * 0.85);
+
+                if (this.caixa.getValorTotalEmLatao() >= precoAtacado * 2) {
+                    int qtdComprada = Math.min(2, itemVenda.getQuantidade() - 1);
+                    long totalPago = precoAtacado * qtdComprada;
+
+                    if (this.caixa.pagarLatao(totalPago)) {
+                        especializada.removerItem(itemVenda.getId(), qtdComprada);
+                        especializada.getCaixa().receberLatao(totalPago);
+
+                        Item loteComprado = clonarItem(itemVenda, qtdComprada);
+                        this.adicionarItemProntoPrateleira(loteComprado);
+
+                        especializada.registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.VENDA_B2B,
+                                itemVenda.getNome(), qtdComprada, totalPago,
+                                "Venda B2B Atacado para " + this.getNome() + " (-15% desconto de atacado)");
+
+                        this.registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.COMPRA_BALCAO,
+                                itemVenda.getNome(), qtdComprada, totalPago,
+                                "Aquisição B2B Atacado de " + especializada.getNome());
+                    }
+                }
+            }
+        }
+    }
+
+    public void processarCicloDiarioV6(int dia, int hora, Random random) {
+        processarDeterioracaoInsumos(dia, hora);
+        processarFilaProducao(dia, hora);
+        processarPrateleiraERoleta(dia, hora, random);
+        if (geradorMineracao != null && cidadeSede != null) {
+            geradorMineracao.extrairMineriosDoDia(this, cidadeSede.getVeiosMineraisDisponiveis(), dia, hora, random);
+        }
+    }
 
     @Override
     public String toString() {

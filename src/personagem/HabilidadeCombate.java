@@ -1,0 +1,131 @@
+package personagem;
+
+import java.util.*;
+
+/**
+ * Representa Técnicas e Habilidades de Combate Inatas ou Marciais (Ficha de Cadastro de Raça).
+ * Respeita a regra canônica: o dado de impacto é específico da fonte (1d4 desarmado,
+ * dado da arma equipada, ou dado fixo da habilidade inata como 2d6 ou 1d8), somando os atributos pertinentes.
+ */
+public class HabilidadeCombate {
+
+    public enum TipoAcaoCombate {
+        ATAQUE_CORPORAL("Ataque Corporal"),
+        PROJETIL("Disparo / Projétil"),
+        SOPRO_ELEMENTAL("Sopro Elemental em Área"),
+        EXPLOSAO_MAGICA("Explosão Mágica"),
+        GOLPE_TATICO("Golpe Tático / Evasivo");
+
+        private final String descricao;
+        TipoAcaoCombate(String descricao) { this.descricao = descricao; }
+        public String getDescricao() { return descricao; }
+    }
+
+    private final String nome;
+    private final TipoAcaoCombate tipoAcao;
+    private final int custoEnergia;
+    private final int custoMana;
+    private final double alcanceMetros;
+    private final String dadoBase; // ex: "1d4", "2d6", "1d8", ou null para "arma equipada"
+    private final List<Atributo> atributosDano;
+    private final String descricaoEfeito;
+    private Integer afinidadeDraconica1d8; // 1: Fogo, 2: Gelo, 3: Raio, 4: Ácido, 5: Vento, 6: Veneno, 7: Luz, 8: Sombra
+
+    public HabilidadeCombate(String nome, TipoAcaoCombate tipoAcao, int custoEnergia, int custoMana,
+                            double alcanceMetros, String dadoBase, List<Atributo> atributosDano,
+                            String descricaoEfeito) {
+        this(nome, tipoAcao, custoEnergia, custoMana, alcanceMetros, dadoBase, atributosDano, descricaoEfeito, null);
+    }
+
+    public HabilidadeCombate(String nome, TipoAcaoCombate tipoAcao, int custoEnergia, int custoMana,
+                            double alcanceMetros, String dadoBase, List<Atributo> atributosDano,
+                            String descricaoEfeito, Integer afinidadeDraconica1d8) {
+        this.nome = nome;
+        this.tipoAcao = tipoAcao;
+        this.custoEnergia = Math.max(0, custoEnergia);
+        this.custoMana = Math.max(0, custoMana);
+        this.alcanceMetros = alcanceMetros;
+        this.dadoBase = dadoBase;
+        this.atributosDano = atributosDano != null ? new ArrayList<>(atributosDano) : Collections.emptyList();
+        this.descricaoEfeito = descricaoEfeito;
+        this.afinidadeDraconica1d8 = afinidadeDraconica1d8;
+    }
+
+    public String getNome() { return nome; }
+    public TipoAcaoCombate getTipoAcao() { return tipoAcao; }
+    public int getCustoEnergia() { return custoEnergia; }
+    public int getCustoMana() { return custoMana; }
+    public double getAlcanceMetros() { return alcanceMetros; }
+    public String getDadoBase() { return dadoBase; }
+    public List<Atributo> getAtributosDano() { return Collections.unmodifiableList(atributosDano); }
+    public String getDescricaoEfeito() { return descricaoEfeito; }
+    public Integer getAfinidadeDraconica1d8() { return afinidadeDraconica1d8; }
+    public void setAfinidadeDraconica1d8(Integer afinidade) { this.afinidadeDraconica1d8 = afinidade; }
+
+    /**
+     * Calcula o dano total da habilidade somando o dado rolado com os atributos da Ficha.
+     */
+    public int calcularDanoTotal(Ficha atacante, int rolagemDado) {
+        int total = Math.max(0, rolagemDado);
+        if (atacante != null) {
+            for (Atributo a : atributosDano) {
+                total += atacante.getAtributoEfetivo(a.name());
+            }
+        }
+        return total;
+    }
+
+    /**
+     * Executa a técnica deduzindo os custos e aplicando o dano no alvo.
+     * Retorna o dano real infligido.
+     */
+    public int executar(Ficha atacante, Ficha alvo, int rolagemDado) {
+        if (atacante == null) return 0;
+
+        // Deduz energia
+        if (custoEnergia > 0) {
+            if (atacante.getEnergia() >= custoEnergia) {
+                atacante.gastarEnergia(custoEnergia);
+            } else {
+                int faltante = custoEnergia - atacante.getEnergia();
+                atacante.gastarEnergia(atacante.getEnergia());
+                atacante.forcarHabilidadeFisicaSemEnergia(faltante);
+            }
+        }
+
+        // Deduz mana
+        if (custoMana > 0) {
+            if (atacante.getMana() >= custoMana) {
+                atacante.gastarMana(custoMana);
+            } else {
+                int faltante = custoMana - atacante.getMana();
+                atacante.gastarMana(atacante.getMana());
+                atacante.forcarMagiaSemMana(faltante);
+            }
+        }
+
+        int danoTotal = calcularDanoTotal(atacante, rolagemDado);
+        int danoReal = 0;
+
+        if (alvo != null) {
+            // Se for ataque psíquico/oculto exclusivo de Sanidade
+            if (tipoAcao == TipoAcaoCombate.EXPLOSAO_MAGICA && atributosDano.contains(Atributo.VON) && !atributosDano.contains(Atributo.FOR)) {
+                danoReal = alvo.sofrerDanoOculto(danoTotal);
+            } else {
+                danoReal = alvo.sofrerDanoFisico(danoTotal);
+            }
+        }
+
+        // Efeitos colaterais inatos de raças específicas
+        if ("Bote da Mandíbula Voraz".equalsIgnoreCase(this.nome)) {
+            // Homens-lagarto recuperam 5 + Grau_VIG de energia
+            int curaEnergia = 5 + atacante.getGrauVig();
+            atacante.setEnergia(Math.min(atacante.getEnergiaMax(), atacante.getEnergia() + curaEnergia));
+        } else if ("Ceifa Espectral do Vazio".equalsIgnoreCase(this.nome) || "Ceifa Espectral do Vazio (Lâmina da Alma)".equalsIgnoreCase(this.nome)) {
+            // Shadar-kai roubam vitalidade curando HP
+            atacante.curarHp(Math.max(1, danoReal / 2));
+        }
+
+        return danoReal;
+    }
+}

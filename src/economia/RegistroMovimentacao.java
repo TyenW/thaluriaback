@@ -18,7 +18,13 @@ public class RegistroMovimentacao {
         EXTRAVIO_CARGA("Extravio de Carga"),
         CARGA_RECUPERADA("Carga Recuperada"),
         PRODUCAO_CRAFTING("Produção / Crafting"),
-        MANUTENCAO_BASE("Manutenção / Infraestrutura");
+        MANUTENCAO_BASE("Manutenção / Infraestrutura"),
+        SALARIO_MINERADORES("Salário dos Mineradores"),
+        PERDA_DETERIORACAO("Perda por Deterioração"),
+        LIQUIDACAO_PRATELEIRA("Liquidação de Prateleira"),
+        RECICLAGEM_SUCATA("Reciclagem de Sucata"),
+        VENDA_B2B("Venda B2B Atacado"),
+        CONTRATO_ENCOMENDA("Contrato de Encomenda Especial");
 
         private final String descricao;
 

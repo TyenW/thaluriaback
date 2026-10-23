@@ -12,16 +12,20 @@ O projeto **RPG Thaluria** opera sob uma arquitetura híbrida e complementar de 
 rpg/
 ├── docs/                   # 📚 Cofre do Obsidian: Lore, Manuais, Fórmulas e Regras
 │   ├── Status.md           # Sistema canônico de atributos, recursos, combate e ascensão
+│   ├── Compêndio de Economia, Comércio e Crafting.md # Índice mestre do motor econômico e manufatura
 │   ├── Compêndio de Grafiturgia Elemental.md  # Índice mestre do sistema de magia em grafos
 │   ├── Compêndio de Raças por Reino.md        # Catálogo geopolítico e espécies por bioma
+│   ├── Sistema de Economia/# 3 Manuais modulares + Arquivo Histórico (v2 a v6)
 │   ├── Sistema de Magia/   # 6 Manuais modulares da Grafiturgia (Teoria dos Grafos)
 │   ├── raças/              # 10 Fichas aprofundadas com constantes raciais e técnicas natas
-│   └── templates/          # Modelos padronizados para criação de magias e raças
+│   └── templates/          # Modelos padronizados (Raças, Magia, Itens e Manufatura)
 │
 └── src/                    # ☕ Motor em Java (Puro, sem dependências externas)
-    ├── geografia/          # Malha territorial, relevo, biomas e topologia de grafos
-    ├── economia/           # Sistema monetário, lojas, redes comerciais e itens
-    └── personagem/         # Ficha canônica traduzindo matematicamente Status.md
+    ├── geografia/          # Malha territorial, relevo, biomas e topologia de grafos (Dijkstra)
+    ├── economia/           # Escala de Latão, Lojas, Caravanas, Crafting v5 e Gestão v6
+    ├── personagem/         # Ficha canônica traduzindo matematicamente Status.md
+    ├── menu/               # Menu interativo de console e cenários canônicos de teste
+    └── teste/              # 4 Suítes completas de testes automatizados (307 testes 100% PASS)
 ```
 
 ---
@@ -107,76 +111,58 @@ A magia em Thaluria é compilada rigorosamente como **Teoria dos Grafos**, onde 
 
 ---
 
-## ☕ 3. Código-Fonte em Java (`src/`)
+---
 
-### 3.1. Pacote `geografia` (A Malha e Topologia do Mundo)
-* **`Cidade.java` (Os Vértices $V$):**
-  * Modela assentamentos (`CIDADE`, `REINO`, `VILA`, `FORTALEZA`).
-  * Atributos de bioma (`Regiao`), relevo (`Geologia`), corpos d'água (`Aquifero`), presença de `porto` e marcação de `fronteira`.
-  * Gerencia lista de rotas (`conexoes`) e lista de entrepostos (`lojas`).
-  * Fornece busca de vizinhos navegáveis (`listarCidadesVizinhas()`).
-  * Inclui algoritmos clássicos implementados: **Merge Sort** (`ordenarCidadesPorId`) e **Busca Binária** (`buscarCidadePorId`).
-* **`Conexao.java` (As Arestas Ponderadas $E$):**
-  * Liga duas cidades de forma bidirecional.
-  * Pesos: `distanciaKm` (comprimento) e `perigo` (escala 1 a 10).
-  * Modalidade: `TERRESTRE` ou `MARITIMA` (exige `temPorto()` em ambas as pontas).
-  * Estado dinâmico: flag `bloqueada` para simular desastres, guerras ou bloqueios de estrada.
-* **Enums de Suporte:** `Regiao.java` (7 biomas), `Geologia.java` (7 formações) e `Aquifero.java` (6 hidrografias).
-
-### 3.2. Pacote `economia` (As Transações e Mercados)
-* **`Carteira.java`:**
-  * Sistema financeiro decimal oficial: $1\text{ PO} = 10\text{ PP} = 100\text{ PC}$.
-  * Método `normalizarMoedas()` para câmbio automático e troco.
-  * Métodos de débito e crédito seguros (`pagar(double)`, `temSaldo(double)`, `adicionarMoedas()`).
-* **`Item.java`:**
-  * Catálogo de equipamentos e consumíveis com `TipoItem` (8 categorias) e `RaridadeItem` (5 categorias).
-  * Controle de preço em PO, peso em kg e quantidade empilhável.
-* **`Lojas.java`:**
-  * Representa lojas e entrepostos comerciais.
-  * Estoque com busca e controle de quantidade de itens.
-  * Caixa próprio (`Carteira`) com fundo de reserva.
-  * Transações completas de compra e venda (`venderItem()`, `comprarItem()`).
-  * Suporte a redes comerciais com as flags `lojaDeRede` e `nomeDaRede`.
-
-### 3.3. Pacote `personagem` (O Motor Matemático de Combate)
-* **`Ficha.java`:**
-  * Implementação direta de todas as fórmulas de `docs/Status.md`.
-  * Instanciação e recálculo dinâmico de recursos máximos e defesas passivas.
-  * Métodos para consumo e aplicação de dano com amortecimento por Defesa Física e Defesa Oculta.
-  * Integração completa com `Carteira` e inventário de `Item`.
+### 2.4. Compêndio de Economia, Comércio e Crafting (`docs/Sistema de Economia/`)
+Todo o sistema financeiro, logístico e de produção foi unificado sob a arquitetura de 6 camadas (v1 a v6), catalogado em [[Compêndio de Economia, Comércio e Crafting]]:
+1. **01 - Base Monetária e Escala de Latão v2:** 10 moedas calculadas na unidade indivisível Latão (`long`), normalização automática e troco exato.
+2. **02 - Sistema de Vendas e Caravanas v3:** Navegação territorial com Dijkstra (`NavegadorGrafo`), 6 estabelecimentos comerciais, precificação dinâmica de oferta/demanda, caravanas cinemáticas com perigo de emboscada e quadro de missões de escolta/resgate com lastro real.
+3. **03 - Itens, Crafting e Gestão de Lojas v4-v6:** Itens modulares com 8 fichas acopladas, Regra do Camarão geográfica, sistema de manufatura com 7 qualidades (`QualidadeCraft`), 4 restrições realistas (subsistemas concretos X/Y/Z, trava ecológica da Guilda Regional, árvore de mineração do ferreiro e requisições 1d20), ordens de produção em dias de mesa, roleta de liquidação 1d100, B2B de atacado (15% off), apodrecimento orgânico, talentos de lojista, IA IRD determinística e Base do Jogador com estufa.
+4. **Arquivo Histórico:** Preserva a análise crua da v1 e o documento original de requisitos.
 
 ---
 
-## 📈 4. Diagnóstico: O que Falta para o Comércio em Grafos Funcionar?
+## ☕ 3. Código-Fonte em Java (`src/`)
 
-A infraestrutura territorial e os nós econômicos já estão criados. Para que o comércio entre cidades funcione de ponta a ponta, restam:
+### 3.1. Pacote `geografia` (A Malha e Topologia do Mundo)
+* **`Cidade.java` (Os Vértices $V$):** Modela assentamentos (`CIDADE`, `REINO`, `VILA`, `FORTALEZA`), bioma (`Regiao`), relevo (`Geologia`), aquífero, portos, conexões e lojas.
+* **`Conexao.java` (As Arestas Ponderadas $E$):** Liga cidades com distância em km e perigo (1 a 10), modalidade terrestre/marítima e estado de bloqueio.
+* **`NavegadorGrafo.java`:** Implementação canônica do algoritmo de Dijkstra encontrando rotas de menor custo ponderando distância e risco.
 
-```mermaid
-graph TD
-    A["Cidade A (Origem)"] -->|Conexao: Distância + Perigo| B["Cidade B (Destino)"]
-    subgraph Falta Implementar
-        R["1. Motor de Grafos (Dijkstra/A*)"]
-        C["2. Entidade Caravana / Agente de Rota"]
-        P["3. Precificação Dinâmica (Oferta/Demanda Local)"]
-        S["4. Sincronização de Rede Comercial"]
-    end
-    A -.-> R
-    R -.-> C
-    C -.-> P
-    P -.-> S
-```
+### 3.2. Pacote `economia` (As Transações, Mercados e Manufatura)
+* **`Carteira.java`:** Gestão de saldo em 10 moedas em Latão (`long`), troco atômico e normalização.
+* **`Item.java`:** Entidade universal com composição modular (8 fichas acopladas), tamanho em slots, perecibilidade e origem regional.
+* **`Lojas.java`:** Estabelecimentos nos 6 tipos canônicos, precificação dinâmica, capacidade volumétrica (armazém/prateleira), árvore de melhorias e talentos lojistas.
+* **`RotaComercial.java` & `Caravana.java`:** Logística de transporte, frete, escoltas e cinemática física com rastreamento hora a hora.
+* **`OficinaCrafting.java` & `MoldeReceita.java`:** Motor de manufatura com 7 graus de qualidade, herança de nomes e filtros de insumo (`ABERTO_SUBSISTEMA`, `SUBCONJUNTO_RESTRITO`, `ITEM_EXATO`).
+* **`SedeGuildaRegional.java` & `GeradorMineracaoForja.java`:** Travas ecológicas regionais e extração mineral com salários e greves.
+* **`IALojistaDeterministica.java` & `CatalogoGlobalDescobertas.java`:** Algoritmo IRD de rentabilidade e catálogo de receitas destravadas no mundo.
+* **`BaseJogador.java` & `EstufaCultivo.java`:** Propriedade de 5 níveis dos aventureiros e cultivo climatizado.
 
-1. **`GrafoComercial.java` (Engine de Caminhos Mínimos):** Orquestrador com algoritmo de Dijkstra ou A* para calcular o melhor trajeto entre cidades distantes, balanceando quilometragem e nível de perigo, ignorando arestas bloqueadas.
-2. **`Caravana.java` (Agente de Transporte):** Entidade física que transporta carga de itens e moedas de uma cidade a outra pelas arestas, com velocidade em km/dia e testes de emboscada.
-3. **Oferta e Demanda por Bioma:** Precificação dinâmica onde recursos abundantes em uma região (ex: madeira na Taiga, pedras nas Montanhas) são baratos na origem e caros no destino (ex: Deserto), viabilizando lucro e arbitragem.
-4. **Reabastecimento de Redes (`lojaDeRede`):** Lógica que faz filiais com estoque baixo solicitarem pedidos automáticos à matriz ou filial mais próxima.
-5. **Simulador de Turnos (`Main`):** Classe principal para executar a malha, movimentar caravanas e imprimir o fluxo comercial.
+### 3.3. Pacote `personagem` (O Motor Matemático de Combate)
+* **`Ficha.java`:** Implementação direta de todas as fórmulas de `docs/Status.md`, recálculo de recursos, defesas passivas, equipamentos multi-slot e passivas de combate em tempo real.
+
+---
+
+## 🏆 4. Garantia de Qualidade e Suítes Automatizadas (307/307 Testes PASS)
+
+O projeto conta com validação contínua e irrestrita sem frameworks externos (Java puro), totalizando **307 testes automatizados com 100% de aprovação**:
+
+| Suíte | Arquivo | Testes | Foco |
+|---|---|:---:|---|
+| **E2E Comercial (v3)** | [`TesteEndToEnd.java`](../src/teste/TesteEndToEnd.java) | **69** | Escala de Latão, 6 lojas, Dijkstra, caravanas, livro-caixa e missões |
+| **Itens Táticos (v4/v4.1)** | [`TesteItemV4.java`](../src/teste/TesteItemV4.java) | **79** | Volumetria, regra do camarão, 33 armas, 13 slots, escudos e passivas |
+| **Crafting v5** | [`TesteCraftingV5.java`](../src/teste/TesteCraftingV5.java) | **92** | 5 oficinas, 7 qualidades, insumos concretos, gerador da forja e requisições 1d20 |
+| **Gestão de Lojas v6** | [`TesteGestaoLojasV6.java`](../src/teste/TesteGestaoLojasV6.java) | **67** | Ordens em dias, roleta 1d100, atacado B2B, deterioração, talentos, IA IRD e Base |
+| **TOTAL** | — | **307/307** | **100% de cobertura funcional validada** |
 
 ---
 
 ## 🧹 5. Ações Recentes de Manutenção Realizadas
 
-1. **Remoção de Arquivos Binários Compilados:**
-   * Deletados todos os 13 arquivos `*.class` que estavam versionados indevidamente em `src/geografia/`, `src/economia/` e `src/personagem/`.
-2. **Criação do `.gitignore`:**
-   * Regra configurada para ignorar `*.class`, `*.jar`, diretórios de compilação (`bin/`, `out/`) e temporários, mantendo o repositório limpo e profissional.
+1. **Modularização e Organização Completa do Cofre (`docs/`):**
+   * Criação do diretório [`Sistema de Economia/`](file:///c:/Users/pedro/Desktop/Codigos/rpg/docs/Sistema%20de%20Economia) agrupando as especificações v2, v3, v4-v6 e Arquivo Histórico.
+   * Criação do [[Compêndio de Economia, Comércio e Crafting]] como índice mestre na raiz do cofre.
+   * Criação do template [[templates/Ficha de Cadastro de Item e Manufatura]] padronizando novas criações.
+2. **Remoção de Binários e Blindagem:**
+   * Versionamento limpo via `.gitignore` ignorando `*.class`, `bin/` e temporários.

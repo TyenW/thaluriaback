@@ -86,6 +86,21 @@ public class MotorEconomico {
 
                 // 4. Manufatura autônoma da loja para atender ao livro de receitas de artesanato
                 loja.processarCraftingDiario(diaAtual, horaAtual);
+
+                // 5. Ciclo v6: deterioração de perecíveis, prateleira/liquidação, ordens e mineração
+                loja.processarCicloDiarioV6(diaAtual, horaAtual, random);
+            }
+
+            // 6. Comércio B2B Inter-Lojas (Loja Geral adquire de especializadas da mesma cidade)
+            for (Lojas loja : cidade.getLojas()) {
+                if (loja.getTipoEstabelecimento() == Lojas.TipoEstabelecimento.LOJA_GERAL) {
+                    loja.executarComprasB2B(cidade.getLojas(), diaAtual, horaAtual);
+                }
+            }
+
+            // 7. Processamento das Requisições ativas da Guilda Regional da Cidade
+            if (cidade.getGuildaRegional() != null) {
+                cidade.getGuildaRegional().processarDiaRequisicoes(diaAtual, horaAtual, random);
             }
         }
     }

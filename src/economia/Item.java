@@ -75,6 +75,12 @@ public class Item {
     private Geologia geologiaOrigem;
     private Aquifero aquiferoOrigem;
 
+    // FASE 6: Gestão Avançada de Lojas, Validade e Obra-Prima (3x)
+    private boolean obraPrima = false;
+    private boolean perecivel = false;
+    private int diasValidadeRestantes = 0;
+    private int diasValidadeMaximo = 0;
+
     // Fichas técnicas modulares (Composição)
     private FichaMaterial fichaMaterial;
     private FichaArmaBranca fichaArmaBranca;
@@ -189,9 +195,39 @@ public class Item {
 
     /**
      * Preço unitário convertido para latão (menor unidade do sistema monetário).
+     * Se o item for uma Obra-Prima (talento Mestre Artesão), o valor de venda é triplicado (3x).
      */
     public long getPrecoEmLatao() {
-        return Carteira.ouroParaLatao(this.preco);
+        double precoEfetivo = obraPrima ? (this.preco * 3.0) : this.preco;
+        return Carteira.ouroParaLatao(precoEfetivo);
+    }
+
+    public boolean isObraPrima() { return obraPrima; }
+    public void setObraPrima(boolean obraPrima) { this.obraPrima = obraPrima; }
+
+    public boolean isPerecivel() { return perecivel; }
+    public void setPerecivel(boolean perecivel) { this.perecivel = perecivel; }
+
+    public int getDiasValidadeRestantes() { return diasValidadeRestantes; }
+    public void setDiasValidadeRestantes(int diasValidadeRestantes) {
+        this.diasValidadeRestantes = Math.max(0, diasValidadeRestantes);
+    }
+
+    public int getDiasValidadeMaximo() { return diasValidadeMaximo; }
+    public void setDiasValidadeMaximo(int diasValidadeMaximo) {
+        this.diasValidadeMaximo = Math.max(0, diasValidadeMaximo);
+    }
+
+    public void configurarPerecivel(int diasValidade) {
+        this.perecivel = true;
+        this.diasValidadeMaximo = Math.max(1, diasValidade);
+        this.diasValidadeRestantes = this.diasValidadeMaximo;
+    }
+
+    public boolean avancarDiaValidade() {
+        if (!perecivel) return false;
+        diasValidadeRestantes--;
+        return diasValidadeRestantes <= 0;
     }
 
     /**

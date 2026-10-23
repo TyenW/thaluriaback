@@ -1,9 +1,11 @@
-# 💰 Sistema Econômico v2 — Thaluria
+# 🪙 01. Base Monetária e Escala de Latão v2 — Thaluria
 
-Este documento descreve **todo o sistema econômico implementado em Java** (pacote `economia`) e **tudo o que mudou** da v1 para a v2. A grande mudança da v2 é a nova escala monetária, com **10 moedas** em vez de 3, e o cálculo de todos os valores em **latão**, a menor moeda.
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]
+
+Este documento descreve **todo o sistema econômico monetário implementado em Java** (pacote `economia`) e **tudo o que evoluiu** da v1 para a v2. A grande virada da v2 é a nova escala monetária canônica, com **10 moedas decimais e hierárquicas** em vez de apenas 3, e o cálculo de todas as grandezas em **Latão (`long`)**, a menor unidade indivisível do sistema.
 
 > [!NOTE]
-> Os preços de itens e os valores de API "em ouro" continuam sendo expressos em **moedas de ouro (PO)** como `double`. Por baixo, tudo é convertido para **latão (`long`)**, para que nenhum valor seja perdido por arredondamento.
+> Os preços de itens e os valores de API "em ouro" continuam sendo expressos em **moedas de ouro (PO)** como `double` para facilidade de leitura. Por baixo, tudo é convertido para **latão (`long`)**, garantindo precisão matemática absoluta sem arredondamento indesejado.
 
 ---
 
@@ -39,10 +41,10 @@ graph TD
 
 | Classe | Arquivo | Responsabilidade |
 |---|---|---|
-| `Carteira` (+ `Carteira.Moeda`) | [Carteira.java](../src/economia/Carteira.java) | Saldo, moedas, pagamentos e conversões |
-| `Item` | [Item.java](../src/economia/Item.java) | Itens, preço (em PO), peso, tipo e raridade |
-| `Lojas` | [Lojas.java](../src/economia/Lojas.java) | Estoque, caixa e compra/venda de itens |
-| `RotaComercial` | [RotaComercial.java](../src/economia/RotaComercial.java) | Distância, perigo, frete e escolta de uma rota |
+| `Carteira` (+ `Carteira.Moeda`) | [`Carteira.java`](../../src/economia/Carteira.java) | Saldo, moedas, pagamentos e conversões |
+| `Item` | [`Item.java`](../../src/economia/Item.java) | Itens, preço (em PO), peso, tipo e raridade |
+| `Lojas` | [`Lojas.java`](../../src/economia/Lojas.java) | Estoque, caixa e compra/venda de itens |
+| `RotaComercial` | [`RotaComercial.java`](../../src/economia/RotaComercial.java) | Distância, perigo, frete e escolta de uma rota |
 
 ---
 
@@ -63,7 +65,7 @@ graph TD
 ```
 
 > [!IMPORTANT]
-> O **édito** é a única moeda que **não** segue a razão 10: vale **1000** talentos.
+> O **édito** é a única moeda que **não** segue a razão 10: vale **1000** talentos (moeda imperial de reserva de tesouro).
 
 ### 2.2 Tabela de moedas
 
@@ -82,16 +84,16 @@ Do menor para o maior valor. A coluna "Valor em latão" é a unidade interna de 
 | Talento | `TALENTO` | TL | 100.000.000 | 10.000 |
 | Édito | `EDITO` | ED | 100.000.000.000 | 10.000.000 |
 
-¹ As siglas PO, PP e PC já existiam na v1. **As demais siglas foram definidas na implementação da v2** e podem ser alteradas livremente no enum `Moeda`.
+¹ As siglas PO, PP e PC já existiam na v1. As demais siglas (PL, PF, PT, CB, DI, TL, ED) foram definidas na implementação da v2 e operam nativamente no enum `Moeda`.
 
 > [!TIP]
-> Para adicionar ou renomear uma moeda, o ponto de partida é o enum `Carteira.Moeda`. O valor de cada moeda e as siglas moram apenas nele. Como a Carteira guarda um campo por moeda, uma moeda nova também exige um campo, um case em `definirCampo`/`getQuantidade` e um getter.
+> Para adicionar ou renomear uma moeda, o ponto de partida é o enum `Carteira.Moeda`. O valor de cada moeda e as siglas residem nele. Como a Carteira guarda um campo por moeda, uma moeda nova também exige um campo, um case em `definirCampo`/`getQuantidade` e um getter.
 
 ---
 
 ## 3. 👛 Carteira
 
-[`economia.Carteira`](../src/economia/Carteira.java) guarda a quantidade de cada uma das 10 moedas e faz as operações financeiras.
+[`economia.Carteira`](../../src/economia/Carteira.java) guarda a quantidade de cada uma das 10 moedas e faz as operações financeiras.
 
 ### 3.1 Como funciona
 
@@ -169,7 +171,7 @@ System.out.println(c);
 
 ## 4. 🎒 Item
 
-[`economia.Item`](../src/economia/Item.java) representa armas, armaduras, consumíveis e recursos.
+[`economia.Item`](../../src/economia/Item.java) representa armas, armaduras, consumíveis e recursos.
 
 - **Preço:** continua em **ouro (PO)**, como `double`. O mínimo é `0.0`.
 - **Peso:** em kg.
@@ -189,7 +191,7 @@ O `toString()` agora mostra o preço **nas moedas do sistema**. Por exemplo, um 
 
 ## 5. 🏪 Lojas
 
-[`economia.Lojas`](../src/economia/Lojas.java) representa um estabelecimento comercial.
+[`economia.Lojas`](../../src/economia/Lojas.java) representa um estabelecimento comercial.
 
 - **Dados:** nome, mercador, se é loja de rede (e o nome da rede), `estoque` (lista de `Item`) e `caixa` (uma `Carteira`).
 - **Caixa inicial:** `50 PO`.
@@ -209,11 +211,11 @@ O `toString()` agora mostra o preço **nas moedas do sistema**. Por exemplo, um 
 
 ## 6. 🚚 RotaComercial
 
-[`economia.RotaComercial`](../src/economia/RotaComercial.java) representa um percurso entre cidades e calcula os custos de transporte.
+[`economia.RotaComercial`](../../src/economia/RotaComercial.java) representa um percurso entre cidades e calcula os custos de transporte.
 
 ### 6.1 Dados da rota
 
-Um objeto é criado com a lista ordenada de cidades e a lista de conexões ([`Conexao`](../src/geografia/Conexao.java)) percorridas. Os indicadores são calculados na construção e não mudam depois.
+Um objeto é criado com a lista ordenada de cidades e a lista de conexões ([`Conexao`](../../src/geografia/Conexao.java)) percorridas. Os indicadores são calculados na construção e não mudam depois.
 
 | Indicador | Cálculo |
 |---|---|
@@ -283,9 +285,9 @@ System.out.println(viajante);                        // 1 PT, 3 PO (13 PO)
 
 | Classe | Uso da economia |
 |---|---|
-| [`personagem.Ficha`](../src/personagem/Ficha.java) | Cada personagem tem uma `Carteira` (`getCarteira()` / `setCarteira()`), criada vazia. Nenhuma alteração foi necessária |
-| [`geografia.Cidade`](../src/geografia/Cidade.java) | Mantém uma lista de `Lojas` (`adicionarLoja`, `removerLoja`, `getLojas`). Nenhuma alteração foi necessária |
-| [`geografia.Conexao`](../src/geografia/Conexao.java) | Fonte de distância e perigo da `RotaComercial`. O perigo pode ser alterado com `ajustarPerigo(int delta)` (mantido entre 1 e 10). Como os indicadores da rota são calculados na criação, **uma rota existente não acompanha** mudanças posteriores na conexão |
+| [`personagem.Ficha`](../../src/personagem/Ficha.java) | Cada personagem tem uma `Carteira` (`getCarteira()` / `setCarteira()`), criada vazia |
+| [`geografia.Cidade`](../../src/geografia/Cidade.java) | Mantém uma lista de `Lojas` (`adicionarLoja`, `removerLoja`, `getLojas`) |
+| [`geografia.Conexao`](../../src/geografia/Conexao.java) | Fonte de distância e perigo da `RotaComercial`. O perigo pode ser alterado com `ajustarPerigo(int delta)` (mantido entre 1 e 10). Como os indicadores da rota são calculados na criação, **uma rota existente não acompanha** mudanças posteriores na conexão |
 
 ---
 
@@ -352,6 +354,9 @@ Os métodos `pagar(double)`, `temSaldo(double)`, `adicionarOuro/Prata/Cobre`, `a
 - **Limite por moeda:** cada campo é um `int`. Se um valor ultrapassar `Integer.MAX_VALUE` (~2,1 bilhões) em uma moeda, ele é truncado. Na prática, só o édito, a maior moeda, chega perto disso.
 - **Precisão de `double`:** `ouroParaLatao` arredonda `valor × 10.000` para o latão mais próximo. Para valores muito grandes ou com muitas casas decimais, prefira trabalhar direto em latão.
 - **`pagar(0)`** retorna `true` e não altera a carteira.
-- **Siglas das moedas novas** (PL, PF, PT, CB, DI, TL, ED) foram definidas na implementação, não vêm de um documento de lore.
-- **Rotas são "fotografias":** os indicadores de `RotaComercial` são calculados na criação. Se o perigo de uma `Conexao` mudar depois, crie uma nova `RotaComercial`.
-- **Testes:** o comportamento foi verificado com testes manuais de console. O projeto ainda não tem testes automatizados (JUnit).
+- **Siglas das moedas novas** (PL, PF, PT, CB, DI, TL, ED) foram definidas na implementação e compõem o padrão canônico de exibição.
+- **Rotas são "fotografias":** os indicadores de `RotaComercial` são calculados na criação. Se o perigo de uma `Conexao` mudar depois, o `NavegadorGrafo` gera uma nova `RotaComercial`.
+- **Garantia de Qualidade:** Todas as conversões e regras monetárias da escala de Latão são auditadas pela suíte automatizada [`TesteEndToEnd.java`](../../src/teste/TesteEndToEnd.java) (69 testes).
+
+---
+> Retornar ao [[Compêndio de Economia, Comércio e Crafting]]
