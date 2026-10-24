@@ -55,6 +55,7 @@ public class SessaoCriacaoFicha {
     }
 
     private final RascunhoFichaEmAndamento rascunho;
+    private boolean impulsoDraconico = false;
 
     public SessaoCriacaoFicha(String idJogador, String nomePersonagem) {
         this.rascunho = new RascunhoFichaEmAndamento(idJogador, nomePersonagem);
@@ -64,11 +65,19 @@ public class SessaoCriacaoFicha {
         return rascunho;
     }
 
+    public void liberarImpulsoDraconico() {
+        this.impulsoDraconico = true;
+    }
+
+    public boolean isImpulsoDraconicoLiberado() {
+        return impulsoDraconico;
+    }
+
     /**
      * Etapa 1: Sorteia as 3 raças disponíveis (Humano + 2 sorteadas com Pity).
      */
     public SorteadorRacaCriacao.OpcoesSorteio executarSorteioRacas(int fatorSorte, boolean boostCampanha, Random r) {
-        rascunho.opcoesRacas = SorteadorRacaCriacao.sortearOpcoesCriacao(fatorSorte, boostCampanha, r);
+        rascunho.opcoesRacas = SorteadorRacaCriacao.sortearOpcoesCriacao(fatorSorte, boostCampanha, impulsoDraconico, r);
         rascunho.etapaAtual = EtapaCriacao.ESCOLHA_RACA;
         return rascunho.opcoesRacas;
     }
@@ -156,6 +165,7 @@ public class SessaoCriacaoFicha {
                 rascunho.racaEscolhida
         );
 
+        ficha.setNome(rascunho.getNomePersonagem());
         for (Map.Entry<Pericia, int[]> e : rascunho.periciasAlocadas.entrySet()) {
             ficha.setPericia(e.getKey(), e.getValue()[0], e.getValue()[1]);
         }

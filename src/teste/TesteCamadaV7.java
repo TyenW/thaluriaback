@@ -352,6 +352,33 @@ public class TesteCamadaV7 {
         HabilidadeCombate sopro = draco.getRaca().getHabilidadeInata();
         afirme(sopro.getDadoBase().equals("2d6"), "Dado fixo do sopro draconiano é 2d6");
         afirme(sopro.getAfinidadeDraconica1d8() == 1, "Afinidade inicial configurada");
+        afirme(sopro.getLinhagemDraconica() == LinhagemDraconica.FOGO, "Linhagem draconiana inicial é Fogo (1)");
+        afirme(sopro.getLinhagemDraconica().getAlcanceMetros() == 4.0, "Geometria do Fogo é Cone de 4 metros");
+
+        // Teste de Resistência do Sopro Draconiano: Alvo resiste com roll >= max(Defesa, DefesaOculta)
+        // draco Defesa = 20, DefesaOculta = 20 -> Limiar = 20
+        Ficha alvoDefensor = new Ficha(10, 10, 10, 10, 10, 10, Raca.HUMANO);
+        int hpAntesDefensor = alvoDefensor.getHp();
+        // 2d6 rolou 8 -> Dano base = 8 + FOR(10) + ESP(10) = 28.
+        // Alvo rola 22 (passou no teste! >= 20) -> Sofre metade do dano: 28 / 2 = 14. Dano real = 14 - Defesa(20)? Não, sofrerDanoFisico desconta Defesa se aplicável, ou dano direto
+        HabilidadeCombate.ResultadoSopro resSucesso = sopro.executarSoproDraconiano(draco, alvoDefensor, 8, 22);
+        afirme(resSucesso.isResistiuMetade(), "Alvo superou teste de resistência: dano cortado pela metade!");
+        afirme(resSucesso.getCondicaoAplicada().contains("Resistiu"), "Condição tática secundária anulada com sucesso no teste");
+
+        // Alvo falha no teste de resistência (roll 15 < limiar 20)
+        Ficha alvoVulneravel = new Ficha(10, 10, 10, 10, 10, 10, Raca.HUMANO);
+        HabilidadeCombate.ResultadoSopro resFalha = sopro.executarSoproDraconiano(draco, alvoVulneravel, 8, 15);
+        afirme(!resFalha.isResistiuMetade(), "Alvo falhou no teste de resistência: sofre dano total!");
+        afirme(resFalha.getCondicaoAplicada().contains("Queimadura"), "Condição tática de Queimadura Contínua aplicada!");
+
+        // Linhagem da Sombra (8): Além do dano físico, drena Sanidade do alvo na falha
+        sopro.setLinhagemDraconica(LinhagemDraconica.SOMBRA);
+        afirme(sopro.getAfinidadeDraconica1d8() == 8, "Linhagem atualizada para Sombra (8)");
+        Ficha alvoSombra = new Ficha(10, 10, 10, 10, 10, 10, Raca.HUMANO);
+        int sanAntes = alvoSombra.getSanidade();
+        HabilidadeCombate.ResultadoSopro resSombra = sopro.executarSoproDraconiano(draco, alvoSombra, 8, 12);
+        afirme(resSombra.getDanoSanidadeExtra() == ((draco.getGrauEsp() / 2) + 2), "Sopro da Sombra calculou dano extra de Sanidade");
+        afirme(alvoSombra.getSanidade() < sanAntes, "Sanidade do alvo foi reduzida pelo Terror Primordial da Sombra!");
     }
 
     // =========================================================================
@@ -467,6 +494,35 @@ public class TesteCamadaV7 {
         afirme(opcoes.getOpcao2Sorteada() != null && opcoes.getOpcao3Sorteada() != null, "Opções 2 e 3 sorteadas");
         afirme(opcoes.getOpcao2Sorteada() != opcoes.getOpcao3Sorteada(), "Opções 2 e 3 foram sorteadas sem repetição");
 
+        // 1.1 Filtro canônico do Pool Inicial (Apenas 4 raças ativas para as vagas 2 e 3)
+        List<Raca> poolInicial = Raca.getRacasPoolSorteioInicial();
+        afirme(poolInicial.size() == 4, "Pool inicial de sorteio contém exatamente 4 raças ativas");
+        afirme(Raca.ANOES.isDisponivelSorteioInicial(), "Anões ativo no sorteio inicial");
+        afirme(Raca.ELFOS_FLORESTA.isDisponivelSorteioInicial(), "Elfos da Floresta ativo no sorteio inicial");
+        afirme(Raca.FADAS.isDisponivelSorteioInicial(), "Fadas ativo no sorteio inicial");
+        afirme(Raca.DRACONATOS.isDisponivelSorteioInicial(), "Draconatos ativo no sorteio inicial");
+        afirme(!Raca.DROW.isDisponivelSorteioInicial(), "Drow inicia desativado do sorteio inicial");
+        afirme(!Raca.KOBOLDS.isDisponivelSorteioInicial(), "Kobolds inicia desativado do sorteio inicial");
+        afirme(!Raca.HOMENS_LAGARTO.isDisponivelSorteioInicial(), "Homens-Lagarto inicia desativado do sorteio inicial");
+        afirme(!Raca.GENASI_FOGO.isDisponivelSorteioInicial(), "Genasi do Fogo inicia desativado do sorteio inicial");
+        afirme(!Raca.GENASI_GELO_AGUA.isDisponivelSorteioInicial(), "Genasi Gelo/Água inicia desativado do sorteio inicial");
+        afirme(!Raca.SHADAR_KAI.isDisponivelSorteioInicial(), "Shadar-kai inicia desativado do sorteio inicial");
+        afirme(Raca.DRACONATOS.getRaridade() == GrauRaridadeRaca.ANCESTRAL_MITICA, "Draconatos configurado como ANCESTRAL_MITICA");
+
+        // 1.2 Validação Estatística: Probabilidade do Draconato < 1% no Sorteio Padrão
+        int totalSimulacoes = 10000;
+        int vezesDraconatoSorteado = 0;
+        Random rngSimulacao = new Random(12345);
+        for (int i = 0; i < totalSimulacoes; i++) {
+            SorteadorRacaCriacao.OpcoesSorteio op = SorteadorRacaCriacao.sortearOpcoesCriacao(0, false, rngSimulacao);
+            if (op.getOpcao2Sorteada() == Raca.DRACONATOS || op.getOpcao3Sorteada() == Raca.DRACONATOS) {
+                vezesDraconatoSorteado++;
+            }
+        }
+        double taxaDraconato = (double) vezesDraconatoSorteado / totalSimulacoes;
+        afirme(taxaDraconato < 0.015, String.format("Chance acumulada do Draconato mantida abaixo de 1.5%% (medido: %.2f%%)", taxaDraconato * 100.0));
+        afirme(SorteadorRacaCriacao.TETO_MAXIMO_PROBABILIDADE_DRACONATO <= 0.009, "Trava de teto do Draconato configurada em <= 0.009 (< 1%)");
+
         // 2. Rolagem inicial dentro dos limites estritos da raça escolhida (Anões: VIG 5-11, FOR 5-10)
         Map<Atributo, Integer> rolagens = SorteadorRacaCriacao.rolarAtributosIniciais(Raca.ANOES, new Random(42));
         afirme(rolagens.get(Atributo.VIG) >= 5 && rolagens.get(Atributo.VIG) <= 11, "VIG rolado dentro de [5, 11]");
@@ -494,7 +550,7 @@ public class TesteCamadaV7 {
         Ficha fichaFinal = sessao.finalizarFicha();
         afirme(fichaFinal != null && fichaFinal.getRaca() == Raca.HUMANO, "Ficha finalizada com sucesso!");
 
-        // 4. Fog-of-War e Permissões do Mestre
+        // 4. Fog-of-War, Permissões e Gestão de Raças do Mestre
         ControlePermissoesMestre fow = new ControlePermissoesMestre();
         afirme(!fow.isCapituloLiberado("Grafiturgia Elemental"), "Capítulo da Grafiturgia inicia bloqueado para os jogadores");
         fow.liberarCapituloWiki("Grafiturgia Elemental");
@@ -509,5 +565,19 @@ public class TesteCamadaV7 {
         fow.setVisibilidadeCidade("Frosthelm", ControlePermissoesMestre.NivelVisibilidadeMapa.ROTA_E_NOME_APENAS);
         afirme(fow.getVisibilidadeCidade("Frosthelm") == ControlePermissoesMestre.NivelVisibilidadeMapa.ROTA_E_NOME_APENAS,
                 "Visibilidade da cidade configurada como ROTA_E_NOME_APENAS no mapa");
+
+        // 5. Mestre ativa e desativa raças no sorteio inicial em tempo de execução
+        afirme(!fow.isRacaDisponivelSorteioInicial("Drow"), "Drow inicia inativo para sorteio inicial");
+        fow.ativarRacaSorteioInicial("Drow");
+        afirme(fow.isRacaDisponivelSorteioInicial("Drow"), "Mestre ativou Drow para o sorteio inicial");
+        afirme(Raca.getRacasPoolSorteioInicial().size() == 5, "Pool de sorteio inicial agora possui 5 raças ativas");
+        fow.desativarRacaSorteioInicial("Drow");
+        afirme(Raca.getRacasPoolSorteioInicial().size() == 4, "Pool de sorteio retornou para 4 raças após desativação");
+
+        // 6. Mestre libera Impulso Dracônico na sessão
+        SessaoCriacaoFicha sessaoDraco = new SessaoCriacaoFicha("jog_02", "Drogon");
+        afirme(!sessaoDraco.isImpulsoDraconicoLiberado(), "Impulso dracônico inicia desativado");
+        sessaoDraco.liberarImpulsoDraconico();
+        afirme(sessaoDraco.isImpulsoDraconicoLiberado(), "Mestre liberou Impulso Dracônico para a sessão!");
     }
 }

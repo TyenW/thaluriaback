@@ -31,6 +31,10 @@ public final class FormulaLinear {
 
     public int getBase() { return base; }
 
+    public Map<Atributo, int[]> getTermos() {
+        return java.util.Collections.unmodifiableMap(termos);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

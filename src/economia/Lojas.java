@@ -35,6 +35,7 @@ public class Lojas {
         }
     }
 
+    private int id;
     private String nome;
     private String mercador;
     private boolean lojaDeRede;
@@ -471,6 +472,9 @@ public class Lojas {
     }
 
     // Getters e Setters
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+
     public int getNivelLoja() { return nivelLoja; }
     public void setNivelLoja(int nivelLoja) { this.nivelLoja = Math.max(1, Math.min(5, nivelLoja)); }
 

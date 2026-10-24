@@ -48,6 +48,7 @@ public class Ficha {
     // Inventário e Economia
     private Carteira carteira;
     private final List<Item> inventario = new ArrayList<>();
+    private final List<Monstro> monstrosDomados = new ArrayList<>();
 
     // Sistema de Equipamento Tático v4 e Efeitos v4.1
     private final Map<FichaArmadura.SlotArmadura, Item> armadurasEquipadas = new EnumMap<>(FichaArmadura.SlotArmadura.class);
@@ -57,8 +58,17 @@ public class Ficha {
     private final List<EfeitoItem> efeitosAtivos = new ArrayList<>();
     private final Map<EfeitoItem, Integer> turnosRestantesEfeito = new LinkedHashMap<>();
 
+    // Identificação do Personagem
+    private long id;
+    private String nome = "Aventureiro Sem Nome";
+
     // Localização Geográfica do Personagem no Mundo
     private geografia.Cidade cidadeAtual;
+
+    public long getId() { return id; }
+    public void setId(long id) { this.id = id; }
+    public String getNome() { return nome; }
+    public void setNome(String nome) { this.nome = nome != null ? nome : "Aventureiro Sem Nome"; }
 
     public Ficha() {
         this(10, 10, 10, 10, 10, 10);
@@ -376,6 +386,21 @@ public class Ficha {
         return true;
     }
 
+    public Map<Pericia, Integer> getGrausPericia() {
+        return Collections.unmodifiableMap(grausPericia);
+    }
+
+    public Map<Pericia, Integer> getMaestriasPericia() {
+        return Collections.unmodifiableMap(maestriasPericia);
+    }
+
+    public void carregarPericiaDoBanco(Pericia p, int grau, int maestria) {
+        if (p != null) {
+            grausPericia.put(p, grau);
+            maestriasPericia.put(p, maestria);
+        }
+    }
+
     public int rolarPericia(Pericia p, Random r) {
         if (p == null) return 0;
         return p.rolar(getGrauPericia(p), getMaestriaPericia(p), r);
@@ -424,11 +449,55 @@ public class Ficha {
 
     // --- Gestão de Capacidade da Mochila e Peso ---
     public double getCapacidadeCargaKg() {
-        return 50.0 + (this.forca * 3.0) + (this.vig * 2.0);
+        double cargaBase = 50.0 + (this.forca * 3.0) + (this.vig * 2.0);
+        for (Monstro m : monstrosDomados) {
+            cargaBase += (m.getForca() * 5.0) + (m.getVig() * 2.0);
+        }
+        return cargaBase;
     }
 
     public double getCapacidadeMochilaSlots() {
-        return 50.0;
+        double slotsBase = 50.0;
+        for (Monstro m : monstrosDomados) {
+            if (m.getPorte() == Monstro.PorteMonstro.GRANDE) {
+                slotsBase += 50.0;
+            } else if (m.getPorte() == Monstro.PorteMonstro.COLOSSAL) {
+                slotsBase += 150.0;
+            }
+        }
+        return slotsBase;
+    }
+
+    public boolean temBestaDeCargaParaColossal() {
+        for (Monstro m : monstrosDomados) {
+            if (m.getPorte() != null && m.getPorte().isBestaDeCargaColossal()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public List<Monstro> getMonstrosDomados() {
+        return Collections.unmodifiableList(monstrosDomados);
+    }
+
+    public void adicionarMonstroDomado(Monstro monstro) {
+        if (monstro != null && !monstrosDomados.contains(monstro)) {
+            monstrosDomados.add(monstro);
+            monstro.setDomado(true);
+            monstro.setDono(this);
+        }
+    }
+
+    public boolean removerMonstroDomado(Monstro monstro) {
+        if (monstro != null && monstrosDomados.remove(monstro)) {
+            if (monstro.getDono() == this) {
+                monstro.setDono(null);
+                monstro.setDomado(false);
+            }
+            return true;
+        }
+        return false;
     }
 
     public double getPesoTotalInventario() {
@@ -449,7 +518,9 @@ public class Ficha {
 
     public boolean adicionarAoInventarioComValidacao(Item item) {
         if (item == null) return false;
-        if (item.getTamanho() == TamanhoItem.COLOSSAL) return false;
+        if (item.getTamanho() == TamanhoItem.COLOSSAL && !temBestaDeCargaParaColossal()) {
+            return false;
+        }
         if (getPesoTotalInventario() + item.getPesoTotal() > getCapacidadeCargaKg()) return false;
         if (getVolumeTotalInventario() + item.getEspacoTotal() > getCapacidadeMochilaSlots()) return false;
         this.inventario.add(item);

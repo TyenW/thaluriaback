@@ -97,6 +97,26 @@ public class ControlePermissoesMestre {
         }
     }
 
+    // --- Controle de Raças no Sorteador Inicial ---
+    public void ativarRacaSorteioInicial(String nomeRaca) {
+        Raca r = Raca.buscarPorNome(nomeRaca);
+        if (r != null) {
+            r.setDisponivelSorteioInicial(true);
+        }
+    }
+
+    public void desativarRacaSorteioInicial(String nomeRaca) {
+        Raca r = Raca.buscarPorNome(nomeRaca);
+        if (r != null) {
+            r.setDisponivelSorteioInicial(false);
+        }
+    }
+
+    public boolean isRacaDisponivelSorteioInicial(String nomeRaca) {
+        Raca r = Raca.buscarPorNome(nomeRaca);
+        return r != null && r.isDisponivelSorteioInicial();
+    }
+
     // --- Controle de Campanha do Mestre ---
     public int getDiaAtualCampanha() { return diaAtualCampanha; }
 

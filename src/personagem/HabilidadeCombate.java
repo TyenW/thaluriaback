@@ -30,6 +30,7 @@ public class HabilidadeCombate {
     private final List<Atributo> atributosDano;
     private final String descricaoEfeito;
     private Integer afinidadeDraconica1d8; // 1: Fogo, 2: Gelo, 3: Raio, 4: Ácido, 5: Vento, 6: Veneno, 7: Luz, 8: Sombra
+    private LinhagemDraconica linhagemDraconica;
 
     public HabilidadeCombate(String nome, TipoAcaoCombate tipoAcao, int custoEnergia, int custoMana,
                             double alcanceMetros, String dadoBase, List<Atributo> atributosDano,
@@ -49,6 +50,7 @@ public class HabilidadeCombate {
         this.atributosDano = atributosDano != null ? new ArrayList<>(atributosDano) : Collections.emptyList();
         this.descricaoEfeito = descricaoEfeito;
         this.afinidadeDraconica1d8 = afinidadeDraconica1d8;
+        this.linhagemDraconica = afinidadeDraconica1d8 != null ? LinhagemDraconica.porNumero(afinidadeDraconica1d8) : LinhagemDraconica.FOGO;
     }
 
     public String getNome() { return nome; }
@@ -60,7 +62,26 @@ public class HabilidadeCombate {
     public List<Atributo> getAtributosDano() { return Collections.unmodifiableList(atributosDano); }
     public String getDescricaoEfeito() { return descricaoEfeito; }
     public Integer getAfinidadeDraconica1d8() { return afinidadeDraconica1d8; }
-    public void setAfinidadeDraconica1d8(Integer afinidade) { this.afinidadeDraconica1d8 = afinidade; }
+    public void setAfinidadeDraconica1d8(Integer afinidade) {
+        this.afinidadeDraconica1d8 = afinidade;
+        if (afinidade != null) {
+            this.linhagemDraconica = LinhagemDraconica.porNumero(afinidade);
+        }
+    }
+
+    public LinhagemDraconica getLinhagemDraconica() {
+        if (linhagemDraconica == null && afinidadeDraconica1d8 != null) {
+            linhagemDraconica = LinhagemDraconica.porNumero(afinidadeDraconica1d8);
+        }
+        return linhagemDraconica != null ? linhagemDraconica : LinhagemDraconica.FOGO;
+    }
+
+    public void setLinhagemDraconica(LinhagemDraconica linhagem) {
+        this.linhagemDraconica = linhagem;
+        if (linhagem != null) {
+            this.afinidadeDraconica1d8 = linhagem.getNumero1d8();
+        }
+    }
 
     /**
      * Calcula o dano total da habilidade somando o dado rolado com os atributos da Ficha.
@@ -127,5 +148,93 @@ public class HabilidadeCombate {
         }
 
         return danoReal;
+    }
+
+    public static class ResultadoSopro {
+        private final int danoInfligido;
+        private final boolean resistiuMetade;
+        private final LinhagemDraconica linhagem;
+        private final String condicaoAplicada;
+        private final int danoSanidadeExtra;
+
+        public ResultadoSopro(int danoInfligido, boolean resistiuMetade, LinhagemDraconica linhagem,
+                              String condicaoAplicada, int danoSanidadeExtra) {
+            this.danoInfligido = danoInfligido;
+            this.resistiuMetade = resistiuMetade;
+            this.linhagem = linhagem;
+            this.condicaoAplicada = condicaoAplicada;
+            this.danoSanidadeExtra = danoSanidadeExtra;
+        }
+
+        public int getDanoInfligido() { return danoInfligido; }
+        public boolean isResistiuMetade() { return resistiuMetade; }
+        public LinhagemDraconica getLinhagem() { return linhagem; }
+        public String getCondicaoAplicada() { return condicaoAplicada; }
+        public int getDanoSanidadeExtra() { return danoSanidadeExtra; }
+
+        @Override
+        public String toString() {
+            return String.format("Sopro Draconiano [%s]: %d dano (%s) | Condição: %s",
+                    linhagem.getElemento(), danoInfligido,
+                    resistiuMetade ? "Resistiu Metade" : "Dano Total",
+                    condicaoAplicada);
+        }
+    }
+
+    /**
+     * Executa o Sopro Primordial Draconiano com teste de resistência contra max(Def. Física, Def. Oculta).
+     * - Sucesso no Teste: Alvo sofre apenas metade do dano e anula a condição tática secundária.
+     * - Falha no Teste: Alvo sofre o dano total e fica sob a condição tática descrita na tabela 1d8.
+     */
+    public ResultadoSopro executarSoproDraconiano(Ficha atacante, Ficha alvo, int rolagem2d6, int rolagemResistenciaAlvo) {
+        if (atacante == null) {
+            return new ResultadoSopro(0, false, getLinhagemDraconica(), "Atacante nulo", 0);
+        }
+
+        // Custo canônico: 3 de Energia e 3 de Mana
+        int custoE = this.custoEnergia > 0 ? this.custoEnergia : 3;
+        int custoM = this.custoMana > 0 ? this.custoMana : 3;
+
+        if (atacante.getEnergia() >= custoE) {
+            atacante.gastarEnergia(custoE);
+        } else {
+            int faltante = custoE - atacante.getEnergia();
+            atacante.gastarEnergia(atacante.getEnergia());
+            atacante.forcarHabilidadeFisicaSemEnergia(faltante);
+        }
+
+        if (atacante.getMana() >= custoM) {
+            atacante.gastarMana(custoM);
+        } else {
+            int faltante = custoM - atacante.getMana();
+            atacante.gastarMana(atacante.getMana());
+            atacante.forcarMagiaSemMana(faltante);
+        }
+
+        LinhagemDraconica linhagem = getLinhagemDraconica();
+        int danoTotal = calcularDanoTotal(atacante, rolagem2d6);
+        int limiarResistencia = Math.max(atacante.getDefesa(), atacante.getDefesaOculta());
+
+        boolean resistiu = (rolagemResistenciaAlvo >= limiarResistencia);
+        int danoFinal = resistiu ? (danoTotal / 2) : danoTotal;
+        int danoReal = 0;
+        int danoSanExtra = 0;
+        String condicao = "Nenhuma";
+
+        if (alvo != null) {
+            danoReal = alvo.sofrerDanoFisico(danoFinal);
+
+            if (!resistiu) {
+                condicao = linhagem.getCondicaoTatica();
+                if (linhagem == LinhagemDraconica.SOMBRA) {
+                    danoSanExtra = (atacante.getGrauEsp() / 2) + 2;
+                    alvo.sofrerDanoOculto(danoSanExtra);
+                }
+            } else {
+                condicao = "Resistiu: Metade do Dano e Condição Anulada";
+            }
+        }
+
+        return new ResultadoSopro(danoReal, resistiu, linhagem, condicao, danoSanExtra);
     }
 }

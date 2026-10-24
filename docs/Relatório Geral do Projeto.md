@@ -15,17 +15,19 @@ rpg/
 │   ├── Compêndio de Economia, Comércio e Crafting.md # Índice mestre do motor econômico e manufatura
 │   ├── Compêndio de Grafiturgia Elemental.md  # Índice mestre do sistema de magia em grafos
 │   ├── Compêndio de Raças por Reino.md        # Catálogo geopolítico e espécies por bioma
+│   ├── Compêndio de Doma e Captura de Monstros.md # Sistema de Doma Pokémon e Bestas de Carga
 │   ├── Sistema de Economia/# 3 Manuais modulares + Arquivo Histórico (v2 a v6)
 │   ├── Sistema de Magia/   # 6 Manuais modulares da Grafiturgia (Teoria dos Grafos)
 │   ├── raças/              # 10 Fichas aprofundadas com constantes raciais e técnicas natas
 │   └── templates/          # Modelos padronizados (Raças, Magia, Itens e Manufatura)
 │
-└── src/                    # ☕ Motor em Java (Puro, sem dependências externas)
+└── src/                    # ☕ Motor em Java (Puro + SQLite JDBC)
     ├── geografia/          # Malha territorial, relevo, biomas e topologia de grafos (Dijkstra)
     ├── economia/           # Escala de Latão, Lojas, Caravanas, Crafting v5 e Gestão v6
-    ├── personagem/         # Ficha canônica traduzindo matematicamente Status.md
+    ├── personagem/         # Ficha, SistemaDoma, Monstro e Status canônico
+    ├── persistencia/       # BancoDados (SQLite), FichaDAO, RacaDAO, ItemDAO, CidadeDAO
     ├── menu/               # Menu interativo de console e cenários canônicos de teste
-    └── teste/              # 4 Suítes completas de testes automatizados (307 testes 100% PASS)
+    └── teste/              # 7 Suítes completas de testes automatizados (567 testes 100% PASS)
 ```
 
 ---

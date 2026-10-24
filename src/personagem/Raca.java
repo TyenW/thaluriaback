@@ -16,6 +16,7 @@ public class Raca {
     private final DominanciaOntologica dominancia;
     private final GrauRaridadeRaca raridade;
     private final TipoAcessoRaca tipoAcesso;
+    private boolean disponivelSorteioInicial;
     private final Map<Atributo, int[]> limitesAtributos;
     private final ParametrosFormulaRacial parametros;
     private final HabilidadeCombate habilidadeInata;
@@ -25,11 +26,21 @@ public class Raca {
                 Map<Atributo, int[]> limitesAtributos,
                 ParametrosFormulaRacial parametros,
                 HabilidadeCombate habilidadeInata) {
+        this(nome, reinoOrigem, dominancia, raridade, tipoAcesso, false, limitesAtributos, parametros, habilidadeInata);
+    }
+
+    public Raca(String nome, String reinoOrigem, DominanciaOntologica dominancia,
+                GrauRaridadeRaca raridade, TipoAcessoRaca tipoAcesso,
+                boolean disponivelSorteioInicial,
+                Map<Atributo, int[]> limitesAtributos,
+                ParametrosFormulaRacial parametros,
+                HabilidadeCombate habilidadeInata) {
         this.nome = nome;
         this.reinoOrigem = reinoOrigem;
         this.dominancia = dominancia;
         this.raridade = raridade;
         this.tipoAcesso = tipoAcesso;
+        this.disponivelSorteioInicial = disponivelSorteioInicial;
         this.limitesAtributos = new EnumMap<>(limitesAtributos);
         this.parametros = parametros != null ? parametros : ParametrosFormulaRacial.padrao();
         this.habilidadeInata = habilidadeInata;
@@ -52,6 +63,8 @@ public class Raca {
     public DominanciaOntologica getDominancia() { return dominancia; }
     public GrauRaridadeRaca getRaridade() { return raridade; }
     public TipoAcessoRaca getTipoAcesso() { return tipoAcesso; }
+    public boolean isDisponivelSorteioInicial() { return disponivelSorteioInicial; }
+    public void setDisponivelSorteioInicial(boolean disponivel) { this.disponivelSorteioInicial = disponivel; }
     public ParametrosFormulaRacial getParametros() { return parametros; }
     public HabilidadeCombate getHabilidadeInata() { return habilidadeInata; }
 
@@ -106,6 +119,7 @@ public class Raca {
         HUMANO = new Raca("Humano", "Terras Centrais",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.COMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Fixo na Vaga 1 do sorteador
                 limHumano, ParametrosFormulaRacial.padrao(), golpeHumano);
 
         // 1. ANÕES (Dwarves) - Frosthelm
@@ -133,6 +147,7 @@ public class Raca {
         ANOES = new Raca("Anões", "Frosthelm",
                 DominanciaOntologica.FISICA_MATERIA,
                 GrauRaridadeRaca.COMUM, TipoAcessoRaca.JOGAVEL,
+                true, // Disponível no sorteio inicial (Pool Vagas 2 e 3)
                 limAnoes, paramAnoes, impactoSismico);
 
         // 2. GENASI DO GELO E ÁGUA - Frosthelm
@@ -160,6 +175,7 @@ public class Raca {
         GENASI_GELO_AGUA = new Raca("Genasi do Gelo e Água", "Frosthelm",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.INCOMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limGenasiGelo, paramGenasiGelo, estilhacoGelo);
 
         // 3. ELFOS DA FLORESTA (Wood Elves) - Sylvanor
@@ -187,6 +203,7 @@ public class Raca {
         ELFOS_FLORESTA = new Raca("Elfos da Floresta", "Sylvanor",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.COMUM, TipoAcessoRaca.JOGAVEL,
+                true, // Disponível no sorteio inicial (Pool Vagas 2 e 3)
                 limElfos, paramElfos, disparoZefiro);
 
         // 4. FADAS (Pixies / Fairy) - Sylvanor
@@ -214,6 +231,7 @@ public class Raca {
         FADAS = new Raca("Fadas", "Sylvanor",
                 DominanciaOntologica.ETEREA_IMATERIAL,
                 GrauRaridadeRaca.RARA, TipoAcessoRaca.JOGAVEL,
+                true, // Disponível no sorteio inicial (Pool Vagas 2 e 3)
                 limFadas, paramFadas, poeiraFeerica);
 
         // 5. HOMENS-LAGARTO (Lizardfolk) - Aurelia
@@ -241,6 +259,7 @@ public class Raca {
         HOMENS_LAGARTO = new Raca("Homens-Lagarto", "Aurelia",
                 DominanciaOntologica.FISICA_MATERIA,
                 GrauRaridadeRaca.COMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limLagarto, paramLagarto, mordidaVoraz);
 
         // 6. KOBOLDS - Aurelia
@@ -269,6 +288,7 @@ public class Raca {
         KOBOLDS = new Raca("Kobolds", "Aurelia",
                 DominanciaOntologica.FISICA_MATERIA,
                 GrauRaridadeRaca.COMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limKobolds, paramKobolds, golpeSujo);
 
         // 7. DRACONATOS (Dragonborn) - Drakos
@@ -296,7 +316,8 @@ public class Raca {
 
         DRACONATOS = new Raca("Draconatos", "Drakos",
                 DominanciaOntologica.FISICA_MATERIA,
-                GrauRaridadeRaca.RARA, TipoAcessoRaca.JOGAVEL,
+                GrauRaridadeRaca.ANCESTRAL_MITICA, TipoAcessoRaca.JOGAVEL,
+                true, // Disponível no sorteio inicial (< 1%)
                 limDraconatos, paramDraconatos, soproDraconiano);
 
         // 8. GENASI DO FOGO (Fire Genasi) - Drakos
@@ -324,6 +345,7 @@ public class Raca {
         GENASI_FOGO = new Raca("Genasi do Fogo", "Drakos",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.INCOMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limGenasiFogo, paramGenasiFogo, pulsoBrasas);
 
         // 9. DROW (Elfos Negros) - Valthera
@@ -351,6 +373,7 @@ public class Raca {
         DROW = new Raca("Drow", "Valthera",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.INCOMUM, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limDrow, paramDrow, laminaVeneno);
 
         // 10. SHADAR-KAI - Valthera
@@ -378,6 +401,7 @@ public class Raca {
         SHADAR_KAI = new Raca("Shadar-kai", "Valthera",
                 DominanciaOntologica.HIBRIDA_EQUILIBRADA,
                 GrauRaridadeRaca.ANCESTRAL_MITICA, TipoAcessoRaca.JOGAVEL,
+                false, // Ativável pelo Mestre
                 limShadarKai, paramShadarKai, ceifaEspectral);
 
         // Registro no Catálogo Oficial
@@ -415,6 +439,20 @@ public class Raca {
             }
         }
         return jogaveis;
+    }
+
+    /**
+     * Retorna a lista de raças ativas para o sorteio inicial nas vagas 2 e 3 (sem o Humano).
+     * Por padrão: Anões, Elfos da Floresta, Fadas e Draconatos.
+     */
+    public static List<Raca> getRacasPoolSorteioInicial() {
+        List<Raca> pool = new ArrayList<>();
+        for (Raca r : CATALOGO.values()) {
+            if (r.isDisponivelSorteioInicial() && !"Humano".equalsIgnoreCase(r.getNome())) {
+                pool.add(r);
+            }
+        }
+        return pool;
     }
 
     @Override
