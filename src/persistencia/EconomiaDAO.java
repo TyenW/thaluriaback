@@ -147,6 +147,29 @@ public class EconomiaDAO {
         }
     }
 
+    public void salvarConexaoSeAusente(Cidade c1, Cidade c2, int dist, int perigo, Conexao.TipoDeRota tipo) {
+        if (c1 == null || c2 == null || c1.equals(c2)) return;
+        if (tipo == Conexao.TipoDeRota.MARITIMA && (!c1.temPorto() || !c2.temPorto())) return;
+
+        String sqlCheck = "SELECT COUNT(*) FROM conexoes WHERE (origem_id = ? AND destino_id = ?) OR (origem_id = ? AND destino_id = ?)";
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sqlCheck)) {
+            ps.setInt(1, c1.getId());
+            ps.setInt(2, c2.getId());
+            ps.setInt(3, c2.getId());
+            ps.setInt(4, c1.getId());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next() && rs.getInt(1) > 0) {
+                    return;
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao verificar conexão existente no SQLite", e);
+        }
+
+        salvarConexao(new Conexao(c1, c2, dist, perigo, tipo));
+    }
+
     public List<Conexao> listarConexoes(Map<Integer, Cidade> cidadesMap) {
         List<Conexao> lista = new ArrayList<>();
         String sql = "SELECT * FROM conexoes ORDER BY id ASC";
@@ -493,6 +516,172 @@ public class EconomiaDAO {
                 bazarSunreach.definirDemanda(espadaFerro, 20);
                 salvarLoja(bazarSunreach);
         }
+
+        popularCidadesAtlasSeAusentes();
+    }
+
+    /**
+     * Sincroniza todas as 34 cidades e rotas canônicas do Atlas SVG de Thalúria no SQLite caso estejam ausentes.
+     */
+    public void popularCidadesAtlasSeAusentes() {
+        Map<String, Cidade> cidadesMap = new LinkedHashMap<>();
+        int maxId = 0;
+        for (Cidade c : listarCidades()) {
+            cidadesMap.put(c.getNome().toUpperCase(), c);
+            if (c.getId() > maxId) maxId = c.getId();
+        }
+
+        // 34 Cidades Canônicas do Atlas de Thaluria
+        Object[][] dadosAtlas = new Object[][] {
+            // Nome, Tipo, Regiao, Geologia, Aquifero, temPorto, eFronteira, regiaoFronteira
+            // Frosthelm
+            { "Frosthelm", Cidade.TipoAssentamento.REINO, Regiao.TUNDRA, Geologia.MONTANHA, Aquifero.RIO, false, false, null },
+            { "Thaldrim", Cidade.TipoAssentamento.CIDADE, Regiao.TUNDRA, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+            { "Valkar", Cidade.TipoAssentamento.CIDADE, Regiao.TUNDRA, Geologia.COLINA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+            { "Kelvorn", Cidade.TipoAssentamento.CIDADE, Regiao.TUNDRA, Geologia.VALE, Aquifero.LAGO_PEQUENO, false, false, null },
+            { "Eirnhold", Cidade.TipoAssentamento.FORTALEZA, Regiao.TUNDRA, Geologia.MONTANHA, Aquifero.RIO, false, false, null },
+
+            // Sylvanor
+            { "Verdan", Cidade.TipoAssentamento.REINO, Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.RIO, false, false, null },
+            { "Eldergrove", Cidade.TipoAssentamento.VILA, Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.LAGO_PEQUENO, false, false, null },
+            { "Ravenford", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.VALE, Aquifero.RIO, false, false, null },
+            { "Willowbrook", Cidade.TipoAssentamento.VILA, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.RIO, false, false, null },
+            { "Moonhaven", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+            { "Stonehollow", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.RIO, false, false, null },
+
+            // Aurelia
+            { "Aurelia", Cidade.TipoAssentamento.REINO, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.RIO, false, false, null },
+            { "Solara", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.RIO, false, false, null },
+            { "Cedrath", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.VALE, Aquifero.RIO, false, false, null },
+            { "Brisamar", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+            { "Valdoria", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.RIO, false, false, null },
+            { "Tamaris", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+
+            // Drakos
+            { "Drakos", Cidade.TipoAssentamento.REINO, Regiao.DESERTO, Geologia.MONTANHA, Aquifero.RIO, false, false, null },
+            { "Karthul", Cidade.TipoAssentamento.CIDADE, Regiao.DESERTO, Geologia.COLINA, Aquifero.RIO, false, false, null },
+            { "Velgrath", Cidade.TipoAssentamento.CIDADE, Regiao.DESERTO, Geologia.CANYON, Aquifero.LAGO_PEQUENO, false, false, null },
+            { "Ravenstoke", Cidade.TipoAssentamento.CIDADE, Regiao.DESERTO, Geologia.COLINA, Aquifero.RIO, false, false, null },
+            { "Cinderport", Cidade.TipoAssentamento.CIDADE, Regiao.DESERTO, Geologia.MONTANHA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+
+            // Valthera
+            { "Valthera", Cidade.TipoAssentamento.REINO, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.LAGO_GRANDE, false, false, null },
+            { "Caelum", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.RIO, false, false, null },
+            { "Duskvale", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.VALE, Aquifero.RIO, false, false, null },
+            { "Shadowfen", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.PLANICIE, Aquifero.PANTANO, false, false, null },
+            { "Eldenreach", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.RIO, false, false, null },
+            { "Noctisport", Cidade.TipoAssentamento.CIDADE, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+
+            // Campos Meridionais
+            { "Lunara", Cidade.TipoAssentamento.CIDADE, Regiao.SAVANA, Geologia.PLANICIE, Aquifero.LAGO_GRANDE, false, false, null },
+            { "Monteluz", Cidade.TipoAssentamento.CIDADE, Regiao.SAVANA, Geologia.COLINA, Aquifero.RIO, false, false, null },
+            { "Ravenspire", Cidade.TipoAssentamento.FORTALEZA, Regiao.SAVANA, Geologia.MONTANHA, Aquifero.RIO, false, false, null },
+            { "Porto Real", Cidade.TipoAssentamento.CIDADE, Regiao.SAVANA, Geologia.PLANICIE, Aquifero.OCEANO_AGUAS_COSTEIRAS, true, false, null },
+
+            // Ilhas
+            { "Azzura", Cidade.TipoAssentamento.FORTALEZA, Regiao.TEMPERADO, Geologia.COLINA, Aquifero.LAGO_GRANDE, true, false, null },
+            { "Varell", Cidade.TipoAssentamento.CIDADE, Regiao.TROPICAL, Geologia.FLORESTA, Aquifero.OCEANO_AGUAS_PROFUNDAS, true, false, null },
+            { "Crepúsculo", Cidade.TipoAssentamento.CIDADE, Regiao.TROPICAL, Geologia.COLINA, Aquifero.OCEANO_AGUAS_PROFUNDAS, true, false, null },
+        };
+
+        for (Object[] d : dadosAtlas) {
+            String nome = (String) d[0];
+            if (!cidadesMap.containsKey(nome.toUpperCase())) {
+                maxId++;
+                Cidade nc = new Cidade(
+                    maxId,
+                    nome,
+                    (Cidade.TipoAssentamento) d[1],
+                    (Regiao) d[2],
+                    (Geologia) d[3],
+                    (Aquifero) d[4],
+                    (Boolean) d[5],
+                    (Boolean) d[6],
+                    (Regiao) d[7]
+                );
+                salvarCidade(nc);
+                cidadesMap.put(nome.toUpperCase(), nc);
+            }
+        }
+
+        // Conexões Terrestres (Estradas) do Atlas
+        Object[][] rotasTerrestres = new Object[][] {
+            { "Frosthelm", "Thaldrim", 90, 2 },
+            { "Thaldrim", "Valkar", 70, 2 },
+            { "Frosthelm", "Kelvorn", 110, 3 },
+            { "Frosthelm", "Eirnhold", 80, 2 },
+            { "Eirnhold", "Cedrath", 130, 4 },
+            { "Kelvorn", "Ravenford", 100, 3 },
+            { "Verdan", "Ravenford", 85, 2 },
+            { "Verdan", "Eldergrove", 95, 2 },
+            { "Verdan", "Willowbrook", 75, 2 },
+            { "Verdan", "Stonehollow", 90, 2 },
+            { "Willowbrook", "Moonhaven", 80, 3 },
+            { "Stonehollow", "Karthul", 120, 4 },
+            { "Cedrath", "Ravenford", 110, 3 },
+            { "Aurelia", "Solara", 80, 2 },
+            { "Aurelia", "Cedrath", 90, 2 },
+            { "Aurelia", "Valdoria", 85, 2 },
+            { "Aurelia", "Brisamar", 110, 3 },
+            { "Solara", "Brisamar", 95, 3 },
+            { "Valdoria", "Tamaris", 100, 3 },
+            { "Brisamar", "Tamaris", 80, 2 },
+            { "Valdoria", "Caelum", 105, 3 },
+            { "Valthera", "Caelum", 80, 2 },
+            { "Valthera", "Duskvale", 75, 2 },
+            { "Valthera", "Shadowfen", 85, 3 },
+            { "Valthera", "Eldenreach", 90, 2 },
+            { "Shadowfen", "Noctisport", 70, 3 },
+            { "Duskvale", "Lunara", 120, 3 },
+            { "Drakos", "Karthul", 90, 3 },
+            { "Drakos", "Velgrath", 80, 2 },
+            { "Drakos", "Ravenstoke", 85, 3 },
+            { "Velgrath", "Ravenstoke", 70, 2 },
+            { "Ravenstoke", "Cinderport", 65, 2 },
+            { "Karthul", "Lunara", 130, 4 },
+            { "Lunara", "Monteluz", 80, 2 },
+            { "Monteluz", "Ravenspire", 75, 3 },
+            { "Monteluz", "Porto Real", 95, 2 },
+            { "Ravenstoke", "Monteluz", 140, 4 },
+            { "Ravenspire", "Eldenreach", 110, 3 },
+            // Conexões com as cidades pré-existentes
+            { "Frostdale", "Ironhold", 120, 4 },
+            { "Ironhold", "Frosthelm", 60, 2 },
+            { "Frostdale", "Thaldrim", 80, 2 },
+            { "Valdorian", "Valdoria", 40, 1 },
+            { "Sunreach", "Karthul", 70, 3 },
+        };
+
+        for (Object[] r : rotasTerrestres) {
+            Cidade c1 = cidadesMap.get(((String) r[0]).toUpperCase());
+            Cidade c2 = cidadesMap.get(((String) r[1]).toUpperCase());
+            if (c1 != null && c2 != null) {
+                salvarConexaoSeAusente(c1, c2, (Integer) r[2], (Integer) r[3], Conexao.TipoDeRota.TERRESTRE);
+            }
+        }
+
+        // Conexões Marítimas do Atlas
+        Object[][] rotasMaritimas = new Object[][] {
+            { "Thaldrim", "Valkar", 120, 2 },
+            { "Valkar", "Brisamar", 160, 3 },
+            { "Brisamar", "Tamaris", 130, 2 },
+            { "Tamaris", "Noctisport", 180, 4 },
+            { "Noctisport", "Porto Real", 200, 3 },
+            { "Porto Real", "Cinderport", 150, 3 },
+            { "Porto Real", "Crepúsculo", 140, 3 },
+            { "Moonhaven", "Varell", 190, 4 },
+            { "Frostdale", "Porto Oakhaven", 160, 3 },
+            { "Porto Oakhaven", "Sunreach", 210, 5 },
+            { "Porto Oakhaven", "Moonhaven", 50, 2 },
+        };
+
+        for (Object[] r : rotasMaritimas) {
+            Cidade c1 = cidadesMap.get(((String) r[0]).toUpperCase());
+            Cidade c2 = cidadesMap.get(((String) r[1]).toUpperCase());
+            if (c1 != null && c2 != null) {
+                salvarConexaoSeAusente(c1, c2, (Integer) r[2], (Integer) r[3], Conexao.TipoDeRota.MARITIMA);
+            }
+        }
     }
 
     /**
@@ -500,6 +689,7 @@ public class EconomiaDAO {
      */
     public MotorEconomico carregarMotorEconomicoCompleto() {
         popularCenarioPadraoSeVazio();
+        popularCidadesAtlasSeAusentes();
 
         MotorEconomico motor = new MotorEconomico();
         List<Cidade> cidades = listarCidades();

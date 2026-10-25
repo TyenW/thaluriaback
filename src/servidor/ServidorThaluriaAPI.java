@@ -224,8 +224,9 @@ public class ServidorThaluriaAPI {
                     cidadesJson.append(String.format("{\"nome\":\"%s\",\"visibilidade\":\"ROTA_E_NOME_APENAS\"}", escapar(c.getNome())));
                 } else {
                     cidadesJson.append(String.format(
-                        "{\"nome\":\"%s\",\"visibilidade\":\"INFORMACOES_COMPLETAS\",\"regiao\":\"%s\",\"geologia\":\"%s\",\"aquifero\":\"%s\",\"lojas\":%d}",
-                        escapar(c.getNome()), c.getRegiao().name(), c.getGeologia().name(), c.getAquifero().name(), c.getLojas().size()
+                        "{\"nome\":\"%s\",\"visibilidade\":\"INFORMACOES_COMPLETAS\",\"visibilidadeJogador\":\"%s\",\"regiao\":\"%s\",\"geologia\":\"%s\",\"aquifero\":\"%s\",\"lojas\":%d}",
+                        escapar(c.getNome()), controleMestre.getVisibilidadeCidade(c.getNome()).name(),
+                        c.getRegiao().name(), c.getGeologia().name(), c.getAquifero().name(), c.getLojas().size()
                     ));
                 }
             }
