@@ -122,4 +122,24 @@ public class PermissoesMestreDAO {
             } catch (Exception ignored) {}
         }
     }
+
+    public ControlePermissoesMestre carregar(economia.MotorEconomico motor) {
+        ControlePermissoesMestre controle = new ControlePermissoesMestre();
+        carregarParaControle(controle);
+        return controle;
+    }
+
+    public void salvar(ControlePermissoesMestre c) {
+        if (c == null) return;
+        salvarControleCompleto(c);
+        for (String monstro : c.getMonstrosRevelados()) {
+            salvarValor("BESTIARIO", monstro, "true");
+        }
+        for (Map.Entry<String, ControlePermissoesMestre.NivelVisibilidadeMapa> e : c.getVisibilidadeCidades().entrySet()) {
+            salvarValor("FOG_CIDADE", e.getKey(), e.getValue().name());
+        }
+        for (Map.Entry<String, ControlePermissoesMestre.NivelVisibilidadeMapa> e : c.getVisibilidadeConexoes().entrySet()) {
+            salvarValor("FOG_CONEXAO", e.getKey(), e.getValue().name());
+        }
+    }
 }

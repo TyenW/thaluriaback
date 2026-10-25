@@ -318,6 +318,20 @@ public class Ficha {
         };
     }
 
+    public int getAtributoBase(Atributo a) {
+        return getValorAtributo(a);
+    }
+
+    public int getVidaAtual() { return hp; }
+    public int getVidaMaxima() { return hpMax; }
+    public int getSanidadeAtual() { return sanidade; }
+    public int getSanidadeMaxima() { return sanidadeMax; }
+    public int getEnergiaAtual() { return energia; }
+    public int getEnergiaMaxima() { return energiaMax; }
+    public int getManaAtual() { return mana; }
+    public int getManaMaxima() { return manaMax; }
+    public int getDefesaFisica() { return defesa; }
+
     public void setValorAtributo(Atributo a, int valor) {
         if (a == null) return;
         switch (a) {

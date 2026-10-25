@@ -515,4 +515,14 @@ public class EconomiaDAO {
 
         return motor;
     }
+
+    public void salvarEstadoCompleto(MotorEconomico motor) {
+        if (motor == null) return;
+        for (Cidade c : motor.getCidades()) {
+            salvarCidade(c);
+            for (Lojas l : c.getLojas()) {
+                salvarLoja(l);
+            }
+        }
+    }
 }

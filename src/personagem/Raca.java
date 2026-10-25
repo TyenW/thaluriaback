@@ -59,6 +59,7 @@ public class Raca {
     }
 
     public String getNome() { return nome; }
+    public String getId() { return nome; }
     public String getReinoOrigem() { return reinoOrigem; }
     public DominanciaOntologica getDominancia() { return dominancia; }
     public GrauRaridadeRaca getRaridade() { return raridade; }

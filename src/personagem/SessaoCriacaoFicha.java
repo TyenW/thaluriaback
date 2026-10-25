@@ -56,9 +56,87 @@ public class SessaoCriacaoFicha {
 
     private final RascunhoFichaEmAndamento rascunho;
     private boolean impulsoDraconico = false;
+    private int limiteMaximoFichas = 2;
+    private int fatorSortePity = 0;
 
     public SessaoCriacaoFicha(String idJogador, String nomePersonagem) {
         this.rascunho = new RascunhoFichaEmAndamento(idJogador, nomePersonagem);
+    }
+
+    public SessaoCriacaoFicha(String idJogador, String nomePersonagem, int limiteMaximoFichas, int fatorSortePity) {
+        this(idJogador, nomePersonagem);
+        this.limiteMaximoFichas = limiteMaximoFichas;
+        this.fatorSortePity = fatorSortePity;
+    }
+
+    public int getLimiteMaximoFichas() {
+        return limiteMaximoFichas;
+    }
+
+    public int getFatorSortePity() {
+        return fatorSortePity;
+    }
+
+    public String getNomePersonagem() {
+        return rascunho.getNomePersonagem();
+    }
+
+    public EtapaCriacao getEtapaAtual() {
+        return rascunho.getEtapaAtual();
+    }
+
+    public Raca getRacaEscolhida() {
+        return rascunho.getRacaEscolhida();
+    }
+
+    public Map<Atributo, Integer> getAtributosRolados() {
+        return rascunho.getAtributosRolados();
+    }
+
+    public int getRerollsDisponiveis() {
+        return rascunho.getRerollsAssistidosDisponiveis();
+    }
+
+    public String getUltimaDicaMestre() {
+        return rascunho.getFeedbackMestre();
+    }
+
+    public boolean isAprovadaPeloMestre() {
+        return rascunho.isAprovadoPeloMestre();
+    }
+
+    public List<Raca> getOpcoesRacaSorteadas() {
+        if (rascunho.getOpcoesRacas() == null) {
+            return Collections.emptyList();
+        }
+        return rascunho.getOpcoesRacas().getListaOpcoes();
+    }
+
+    public SorteadorRacaCriacao.OpcoesSorteio iniciarEExecutarSorteioRacas(int fatorSorte, Random r) {
+        return executarSorteioRacas(fatorSorte, false, r);
+    }
+
+    public void escolherRacaERolarAtributos(int indiceOpcao, Random r) {
+        List<Raca> opcoes = getOpcoesRacaSorteadas();
+        if (indiceOpcao >= 0 && indiceOpcao < opcoes.size()) {
+            escolherRaca(opcoes.get(indiceOpcao));
+            rolarAtributosIniciais(r);
+        }
+    }
+
+    public void enviarDicaDoMestre(String dica) {
+        enviarDicaOuObservacaoMestre(dica);
+    }
+
+    public void concederRerollAssistidoPeloMestre(int qtd) {
+        for (int i = 0; i < qtd; i++) {
+            rascunho.rerollsAssistidosDisponiveis++;
+        }
+        rascunho.feedbackMestre = "Reroll(s) assistido(s) concedido(s) pelo Mestre (+" + qtd + ")";
+    }
+
+    public void aprovarFichaPeloMestre() {
+        aprovarPeloMestre();
     }
 
     public RascunhoFichaEmAndamento getRascunho() {

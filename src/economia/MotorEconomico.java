@@ -357,6 +357,7 @@ public class MotorEconomico {
     }
 
     // Getters de Estado
+    public MotorEconomico getMapa() { return this; }
     public List<Cidade> getCidades() { return Collections.unmodifiableList(cidades); }
     public List<Caravana> getCaravanas() { return Collections.unmodifiableList(caravanas); }
     public List<MissaoComercial> getMissoes() { return Collections.unmodifiableList(missoes); }

@@ -21,8 +21,20 @@ public class HabilidadeCombate {
         public String getDescricao() { return descricao; }
     }
 
+    public enum CategoriaHabilidade {
+        ATAQUE_INATO_RACIAL("Ataque Inato / Racial"),
+        MAGIA_ARCANA("Magia Arcana / Elemental"),
+        TECNICA_MARCIAL("Técnica Marcial"),
+        TATICO_ESPECIAL("Tático / Especial");
+
+        private final String descricao;
+        CategoriaHabilidade(String descricao) { this.descricao = descricao; }
+        public String getDescricao() { return descricao; }
+    }
+
     private final String nome;
     private final TipoAcaoCombate tipoAcao;
+    private CategoriaHabilidade categoriaHabilidade;
     private final int custoEnergia;
     private final int custoMana;
     private final double alcanceMetros;
@@ -31,6 +43,26 @@ public class HabilidadeCombate {
     private final String descricaoEfeito;
     private Integer afinidadeDraconica1d8; // 1: Fogo, 2: Gelo, 3: Raio, 4: Ácido, 5: Vento, 6: Veneno, 7: Luz, 8: Sombra
     private LinhagemDraconica linhagemDraconica;
+
+    public HabilidadeCombate(String nome, CategoriaHabilidade categoria, int custoEnergia, int custoMana,
+                            int qtdDados, int facesDado, boolean boolIgnorado,
+                            Atributo atributo1, Atributo atributo2,
+                            String descricaoEfeito) {
+        this.nome = nome;
+        this.categoriaHabilidade = categoria;
+        this.tipoAcao = (categoria == CategoriaHabilidade.MAGIA_ARCANA) ? TipoAcaoCombate.EXPLOSAO_MAGICA : TipoAcaoCombate.ATAQUE_CORPORAL;
+        this.custoEnergia = Math.max(0, custoEnergia);
+        this.custoMana = Math.max(0, custoMana);
+        this.alcanceMetros = 1.5;
+        this.dadoBase = (qtdDados > 0 && facesDado > 0) ? (qtdDados + "d" + facesDado) : null;
+        List<Atributo> attrs = new ArrayList<>();
+        if (atributo1 != null) attrs.add(atributo1);
+        if (atributo2 != null) attrs.add(atributo2);
+        this.atributosDano = attrs;
+        this.descricaoEfeito = descricaoEfeito;
+        this.afinidadeDraconica1d8 = null;
+        this.linhagemDraconica = LinhagemDraconica.FOGO;
+    }
 
     public HabilidadeCombate(String nome, TipoAcaoCombate tipoAcao, int custoEnergia, int custoMana,
                             double alcanceMetros, String dadoBase, List<Atributo> atributosDano,

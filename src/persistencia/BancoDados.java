@@ -38,6 +38,10 @@ public class BancoDados {
         return conn;
     }
 
+    public static Connection obterConexao() throws SQLException {
+        return getConnection();
+    }
+
     /**
      * Inicializa todas as tabelas relacionais do sistema em SQLite (DDL idempotente).
      */
@@ -227,23 +231,126 @@ public class BancoDados {
                 );
                 """,
 
-                // 12. MONSTROS DOMADOS DO PERSONAGEM (SISTEMA DE DOMA)
+                // 12. TABELA DE CONTAS/UTILIZADORES (Login, Papel Jogador/Mestre, Limite de Fichas e Pity)
+                """
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    senha TEXT NOT NULL,
+                    papel TEXT NOT NULL DEFAULT 'JOGADOR',
+                    limite_maximo_fichas INTEGER NOT NULL DEFAULT 1,
+                    fator_sorte_pity INTEGER NOT NULL DEFAULT 0
+                );
+                """,
+
+                // 13. TABELA DE SESSÕES DE CRIAÇÃO DE FICHA EM TEMPO REAL (Espelhamento Jogador -> Mestre)
+                """
+                CREATE TABLE IF NOT EXISTS sessoes_criacao_ficha (
+                    usuario_id INTEGER PRIMARY KEY,
+                    nome_personagem_rascunho TEXT,
+                    etapa_atual TEXT NOT NULL,
+                    opcoes_racas_sorteadas TEXT,
+                    raca_escolhida TEXT,
+                    linhagem_draconica TEXT,
+                    atributos_rolados_json TEXT,
+                    impulso_draconico_ativo INTEGER NOT NULL DEFAULT 0,
+                    rerolls_concedidos INTEGER NOT NULL DEFAULT 0,
+                    dica_mestre TEXT,
+                    aprovada_pelo_mestre INTEGER NOT NULL DEFAULT 0,
+                    atualizado_em INTEGER NOT NULL,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+                );
+                """,
+
+                // 14. CATÁLOGO DO BESTIÁRIO (Monstros Selvagens e Chefes Solo)
+                """
+                CREATE TABLE IF NOT EXISTS monstros_catalogo (
+                    id TEXT PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    regiao_nativa TEXT NOT NULL,
+                    geologia_nativa TEXT NOT NULL,
+                    aquifero_nativo TEXT NOT NULL,
+                    elemento_primario TEXT NOT NULL,
+                    elemento_secundario TEXT,
+                    porte TEXT NOT NULL DEFAULT 'MEDIO',
+                    vig_base INTEGER NOT NULL,
+                    for_base INTEGER NOT NULL,
+                    des_base INTEGER NOT NULL,
+                    men_base INTEGER NOT NULL,
+                    esp_base INTEGER NOT NULL,
+                    von_base INTEGER NOT NULL,
+                    domesticavel INTEGER NOT NULL DEFAULT 1,
+                    chefe_solo INTEGER NOT NULL DEFAULT 0,
+                    multiplicador_hp_chefe INTEGER NOT NULL DEFAULT 1
+                );
+                """,
+
+                // 15. MOVESET ESTILO POKÉMON DOS MONSTROS (4 Slots Ativos + Learnset por Grau/Rank)
+                """
+                CREATE TABLE IF NOT EXISTS monstro_golpes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    monstro_catalogo_id TEXT NOT NULL,
+                    grau_desbloqueio INTEGER NOT NULL DEFAULT 0,
+                    slot_inicial INTEGER NOT NULL DEFAULT 0,
+                    nome_golpe TEXT NOT NULL,
+                    categoria_pokemon TEXT NOT NULL,
+                    elemento TEXT NOT NULL,
+                    custo_energia INTEGER NOT NULL DEFAULT 0,
+                    custo_mana INTEGER NOT NULL DEFAULT 0,
+                    qtd_dados INTEGER NOT NULL DEFAULT 1,
+                    faces_dado INTEGER NOT NULL DEFAULT 6,
+                    atributo_escala_1 TEXT NOT NULL,
+                    atributo_escala_2 TEXT,
+                    efeito_colateral TEXT,
+                    FOREIGN KEY (monstro_catalogo_id) REFERENCES monstros_catalogo(id) ON DELETE CASCADE
+                );
+                """,
+
+                // 16. TABELA DE DROPS DE MONSTROS (Qualidade Q1-Q5, Raridade e Regra do Camarão)
+                """
+                CREATE TABLE IF NOT EXISTS monstro_drops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    monstro_catalogo_id TEXT NOT NULL,
+                    item_nome TEXT NOT NULL,
+                    probabilidade REAL NOT NULL,
+                    qtd_min INTEGER NOT NULL DEFAULT 1,
+                    qtd_max INTEGER NOT NULL DEFAULT 1,
+                    raridade TEXT NOT NULL DEFAULT 'COMUM',
+                    qualidade_material INTEGER NOT NULL DEFAULT 1,
+                    drop_exclusivo INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (monstro_catalogo_id) REFERENCES monstros_catalogo(id) ON DELETE CASCADE
+                );
+                """,
+
+                // 17. FICHAS DE MONSTROS DOMADOS VINCULADAS À FICHA DO JOGADOR (Compatibilidade Unificada v7/v8)
                 """
                 CREATE TABLE IF NOT EXISTS ficha_monstros_domados (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ficha_id INTEGER NOT NULL,
-                    nome TEXT NOT NULL,
-                    especie TEXT NOT NULL,
-                    porte TEXT NOT NULL,
+                    ficha_id INTEGER,
+                    ficha_dono_id INTEGER,
+                    monstro_catalogo_id TEXT,
+                    apelido TEXT,
+                    ficha_propria_id INTEGER,
+                    nome TEXT,
+                    especie TEXT,
+                    porte TEXT,
                     domesticavel INTEGER NOT NULL DEFAULT 1,
-                    vig INTEGER NOT NULL,
-                    forca INTEGER NOT NULL,
-                    des INTEGER NOT NULL,
-                    men INTEGER NOT NULL,
-                    esp INTEGER NOT NULL,
-                    von INTEGER NOT NULL,
-                    hp INTEGER NOT NULL,
-                    hp_max INTEGER NOT NULL,
+                    vig INTEGER NOT NULL DEFAULT 10,
+                    forca INTEGER NOT NULL DEFAULT 10,
+                    des INTEGER NOT NULL DEFAULT 10,
+                    men INTEGER NOT NULL DEFAULT 10,
+                    esp INTEGER NOT NULL DEFAULT 10,
+                    von INTEGER NOT NULL DEFAULT 10,
+                    hp INTEGER NOT NULL DEFAULT 30,
+                    hp_max INTEGER NOT NULL DEFAULT 30,
+                    golpe_slot_1 TEXT,
+                    golpe_slot_2 TEXT,
+                    golpe_slot_3 TEXT,
+                    golpe_slot_4 TEXT,
+                    besta_de_carga_ativa INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (ficha_dono_id) REFERENCES fichas(id) ON DELETE CASCADE,
+                    FOREIGN KEY (monstro_catalogo_id) REFERENCES monstros_catalogo(id),
+                    FOREIGN KEY (ficha_propria_id) REFERENCES fichas(id) ON DELETE CASCADE,
                     FOREIGN KEY (ficha_id) REFERENCES fichas(id) ON DELETE CASCADE
                 );
                 """
@@ -252,6 +359,26 @@ public class BancoDados {
         try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
             for (String sql : tabelasDdl) {
                 stmt.execute(sql);
+            }
+
+            // Migração defensiva caso ficha_monstros_domados já existisse sem as colunas v8
+            String[] colunasMigracao = {
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN ficha_dono_id INTEGER",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN monstro_catalogo_id TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN apelido TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN ficha_propria_id INTEGER",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_1 TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_2 TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_3 TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_4 TEXT",
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN besta_de_carga_ativa INTEGER NOT NULL DEFAULT 1"
+            };
+            for (String colSql : colunasMigracao) {
+                try {
+                    stmt.execute(colSql);
+                } catch (SQLException ignored) {
+                    // Coluna já presente
+                }
             }
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao inicializar esquema do banco SQLite!", e);

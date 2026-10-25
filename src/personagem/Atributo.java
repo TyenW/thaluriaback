@@ -24,6 +24,14 @@ public enum Atributo {
         this.fisico = fisico;
     }
 
+    // Aliases estáticos para compatibilidade de nomenclatura
+    public static final Atributo VIGOR = VIG;
+    public static final Atributo FORCA = FOR;
+    public static final Atributo DESTREZA = DES;
+    public static final Atributo MENTAL = MEN;
+    public static final Atributo ESPIRITO = ESP;
+    public static final Atributo VONTADE = VON;
+
     public String getNomeCompleto() { return nomeCompleto; }
     public boolean isFisico() { return fisico; }
 

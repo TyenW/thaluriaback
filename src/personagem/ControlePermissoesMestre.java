@@ -127,4 +127,50 @@ public class ControlePermissoesMestre {
         }
         return diaAtualCampanha;
     }
+
+    public void avancarDiasDeMercado(int dias, Random r) {
+        int d = Math.max(1, dias);
+        diaAtualCampanha += d;
+    }
+
+    public void avancarDiasDeMercado(int dias, economia.MotorEconomico motor, Random r) {
+        int d = Math.max(1, dias);
+        for (int i = 0; i < d; i++) {
+            avancarDiaMestre(motor);
+        }
+    }
+
+    public boolean isMonstroReveladoNoBestiario(String idOuNomeMonstro) {
+        return isMonstroRevelado(idOuNomeMonstro);
+    }
+
+    public void definirVisibilidadeCidade(String nomeCidade, NivelVisibilidadeMapa nivel) {
+        setVisibilidadeCidade(nomeCidade, nivel);
+    }
+
+    public List<String> getCapitulosWikiLiberados() {
+        List<String> liberados = new ArrayList<>();
+        for (Map.Entry<String, Boolean> e : capitulosWikiLiberados.entrySet()) {
+            if (Boolean.TRUE.equals(e.getValue())) {
+                liberados.add(e.getKey());
+            }
+        }
+        return liberados;
+    }
+
+    public Map<String, Boolean> getMapaCapitulosWiki() {
+        return Collections.unmodifiableMap(capitulosWikiLiberados);
+    }
+
+    public Set<String> getMonstrosRevelados() {
+        return Collections.unmodifiableSet(monstrosReveladosBestiario);
+    }
+
+    public Map<String, NivelVisibilidadeMapa> getVisibilidadeCidades() {
+        return Collections.unmodifiableMap(visibilidadeCidades);
+    }
+
+    public Map<String, NivelVisibilidadeMapa> getVisibilidadeConexoes() {
+        return Collections.unmodifiableMap(visibilidadeConexoes);
+    }
 }

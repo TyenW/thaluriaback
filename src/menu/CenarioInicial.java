@@ -21,9 +21,14 @@ public class CenarioInicial {
         public Cidade valdorian;
         public Cidade oakhaven;
         public Cidade sunreach;
+
+        public MotorEconomico getMotor() { return motor; }
+        public Ficha getJogador() { return jogador; }
     }
 
-    public static DadosMundo criarCenarioPadrao() {
+    public static class DadosCenario extends DadosMundo {}
+
+    public static DadosCenario criarCenarioPadrao() {
         // 1. Inicializa o banco SQLite e popula esquema e catálogos canônicos se vazios
         BancoDados.inicializarEsquema();
         new RacaDAO().popularRacasPadraoSeVazio();
@@ -31,7 +36,7 @@ public class CenarioInicial {
         EconomiaDAO economiaDAO = new EconomiaDAO();
         economiaDAO.popularCenarioPadraoSeVazio();
 
-        DadosMundo dados = new DadosMundo();
+        DadosCenario dados = new DadosCenario();
         dados.motor = economiaDAO.carregarMotorEconomicoCompleto();
 
         for (Cidade c : dados.motor.getCidades()) {
