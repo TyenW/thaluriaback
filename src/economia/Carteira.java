@@ -300,6 +300,55 @@ public class Carteira {
         normalizarMoedas();
     }
 
+    // ------------------------------------------------------------------
+    // Moedas físicas (sem conversão automática)
+    // ------------------------------------------------------------------
+
+    /**
+     * Define a quantidade física de uma moeda SEM normalizar o saldo: 15 PP
+     * continuam sendo 15 PP. Usado pela ficha do personagem, onde cada
+     * denominação é contada separadamente.
+     */
+    public void definirQuantidadeFisica(Moeda moeda, int quantidade) {
+        if (moeda == null)
+            return;
+        definirCampo(moeda, Math.max(0, quantidade));
+    }
+
+    /**
+     * Serializa as moedas físicas no formato {@code "LATAO=3,FERRO=0,...,EDITO=0"}.
+     */
+    public String serializarMoedasFisicas() {
+        StringBuilder sb = new StringBuilder();
+        for (Moeda m : Moeda.values()) {
+            if (sb.length() > 0)
+                sb.append(',');
+            sb.append(m.name()).append('=').append(getQuantidade(m));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Reconstrói uma carteira a partir de {@link #serializarMoedasFisicas()},
+     * preservando cada denominação exatamente como foi salva. Entradas
+     * desconhecidas ou inválidas são ignoradas.
+     */
+    public static Carteira deMoedasFisicas(String serializado) {
+        Carteira c = new Carteira();
+        if (serializado == null || serializado.isBlank())
+            return c;
+        for (String par : serializado.split(",")) {
+            String[] kv = par.split("=", 2);
+            if (kv.length != 2)
+                continue;
+            try {
+                c.definirQuantidadeFisica(Moeda.valueOf(kv[0].trim()), Integer.parseInt(kv[1].trim()));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        return c;
+    }
+
     public int getEdito() {
         return edito;
     }

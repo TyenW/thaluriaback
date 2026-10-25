@@ -60,15 +60,21 @@ public class Ficha {
 
     // Identificação do Personagem
     private long id;
+    private int usuarioId = 1;
     private String nome = "Aventureiro Sem Nome";
+    private String imagemUrl = "";
 
     // Localização Geográfica do Personagem no Mundo
     private geografia.Cidade cidadeAtual;
 
     public long getId() { return id; }
     public void setId(long id) { this.id = id; }
+    public int getUsuarioId() { return usuarioId; }
+    public void setUsuarioId(int usuarioId) { this.usuarioId = usuarioId; }
     public String getNome() { return nome; }
     public void setNome(String nome) { this.nome = nome != null ? nome : "Aventureiro Sem Nome"; }
+    public String getImagemUrl() { return imagemUrl != null ? imagemUrl : ""; }
+    public void setImagemUrl(String imagemUrl) { this.imagemUrl = imagemUrl != null ? imagemUrl : ""; }
 
     public Ficha() {
         this(10, 10, 10, 10, 10, 10);

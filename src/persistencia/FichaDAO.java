@@ -11,6 +11,7 @@ import personagem.Raca;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -69,8 +70,8 @@ public class FichaDAO {
             INSERT INTO fichas (
                 nome, raca_nome, vig, forca, des, men, esp, von,
                 hp, hp_max, sanidade, sanidade_max, energia, energia_max, mana, mana_max,
-                defesa, defesa_oculta, pontos_essencia, carteira_latao, cidade_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                defesa, defesa_oculta, pontos_essencia, carteira_latao, cidade_id, imagem_url, usuario_id, carteira_moedas
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """;
 
         try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -90,13 +91,13 @@ public class FichaDAO {
             UPDATE fichas SET
                 nome = ?, raca_nome = ?, vig = ?, forca = ?, des = ?, men = ?, esp = ?, von = ?,
                 hp = ?, hp_max = ?, sanidade = ?, sanidade_max = ?, energia = ?, energia_max = ?, mana = ?, mana_max = ?,
-                defesa = ?, defesa_oculta = ?, pontos_essencia = ?, carteira_latao = ?, cidade_id = ?
+                defesa = ?, defesa_oculta = ?, pontos_essencia = ?, carteira_latao = ?, cidade_id = ?, imagem_url = ?, usuario_id = ?, carteira_moedas = ?
             WHERE id = ?
         """;
 
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             preencherParametrosFicha(ps, ficha);
-            ps.setLong(22, ficha.getId());
+            ps.setLong(25, ficha.getId());
             ps.executeUpdate();
         }
     }
@@ -127,32 +128,32 @@ public class FichaDAO {
         } else {
             ps.setNull(21, Types.INTEGER);
         }
+        ps.setString(22, ficha.getImagemUrl());
+        ps.setInt(23, ficha.getUsuarioId() > 0 ? ficha.getUsuarioId() : 1);
+        ps.setString(24, ficha.getCarteira() != null ? ficha.getCarteira().serializarMoedasFisicas() : null);
     }
 
     private void salvarPericias(Connection conn, Ficha ficha) throws SQLException {
-        String sqlDelete = "DELETE FROM ficha_pericias WHERE ficha_id = ?";
-        try (PreparedStatement psDel = conn.prepareStatement(sqlDelete)) {
-            psDel.setLong(1, ficha.getId());
-            psDel.executeUpdate();
-        }
-
         Map<Pericia, Integer> graus = ficha.getGrausPericia();
         Map<Pericia, Integer> maestrias = ficha.getMaestriasPericia();
         if (graus == null || graus.isEmpty()) return;
 
-        String sqlIns = "INSERT INTO ficha_pericias (ficha_id, pericia, grau, maestria) VALUES (?, ?, ?, ?)";
+        String sqlIns = """
+            INSERT INTO ficha_pericias (ficha_id, pericia, grau, maestria) VALUES (?, ?, ?, ?)
+            ON CONFLICT(ficha_id, pericia) DO UPDATE SET
+                grau = excluded.grau,
+                maestria = excluded.maestria
+        """;
         try (PreparedStatement psIns = conn.prepareStatement(sqlIns)) {
             for (Map.Entry<Pericia, Integer> entry : graus.entrySet()) {
                 Pericia p = entry.getKey();
                 int grau = entry.getValue();
                 int maestria = maestrias.getOrDefault(p, 0);
-                if (grau > 0 || maestria > 0) {
-                    psIns.setLong(1, ficha.getId());
-                    psIns.setString(2, p.name());
-                    psIns.setInt(3, grau);
-                    psIns.setInt(4, maestria);
-                    psIns.addBatch();
-                }
+                psIns.setLong(1, ficha.getId());
+                psIns.setString(2, p.name());
+                psIns.setInt(3, grau);
+                psIns.setInt(4, maestria);
+                psIns.addBatch();
             }
             psIns.executeBatch();
         }
@@ -275,12 +276,51 @@ public class FichaDAO {
         return lista;
     }
 
-    public boolean excluir(long id) {
-        String sql = "DELETE FROM fichas WHERE id = ?";
+    public List<Ficha> listarPorUsuario(int usuarioId) {
+        List<Ficha> lista = new ArrayList<>();
+        String sql = "SELECT * FROM fichas WHERE usuario_id = ? ORDER BY id ASC";
         try (Connection conn = BancoDados.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, id);
-            return ps.executeUpdate() > 0;
+            ps.setInt(1, usuarioId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(carregarFichaDoResultSet(conn, rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao listar fichas do usuário " + usuarioId, e);
+        }
+        return lista;
+    }
+
+    public boolean excluir(long id) {
+        try (Connection conn = BancoDados.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps1 = conn.prepareStatement("DELETE FROM ficha_pericias WHERE ficha_id = ?")) {
+                    ps1.setLong(1, id);
+                    ps1.executeUpdate();
+                }
+                try (PreparedStatement ps2 = conn.prepareStatement("DELETE FROM ficha_inventario WHERE ficha_id = ?")) {
+                    ps2.setLong(1, id);
+                    ps2.executeUpdate();
+                }
+                try (PreparedStatement ps3 = conn.prepareStatement("DELETE FROM ficha_monstros_domados WHERE ficha_dono_id = ? OR ficha_id = ?")) {
+                    ps3.setLong(1, id);
+                    ps3.setLong(2, id);
+                    ps3.executeUpdate();
+                }
+                boolean deletou;
+                try (PreparedStatement psFicha = conn.prepareStatement("DELETE FROM fichas WHERE id = ?")) {
+                    psFicha.setLong(1, id);
+                    deletou = psFicha.executeUpdate() > 0;
+                }
+                conn.commit();
+                return deletou;
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao excluir ficha no SQLite: ID " + id, e);
         }
@@ -308,14 +348,29 @@ public class FichaDAO {
         Ficha ficha = new Ficha(vig, forca, des, men, esp, von, raca);
         ficha.setId(id);
         ficha.setNome(nome);
+        try {
+            ficha.setUsuarioId(rs.getInt("usuario_id"));
+        } catch (SQLException ignored) {}
         ficha.setHp(rs.getInt("hp"));
         ficha.setSanidade(rs.getInt("sanidade"));
         ficha.setEnergia(rs.getInt("energia"));
         ficha.setMana(rs.getInt("mana"));
         ficha.setPontosEssencia(rs.getInt("pontos_essencia"));
+        try {
+            ficha.setImagemUrl(rs.getString("imagem_url"));
+        } catch (SQLException ignored) {}
 
-        long saldoLatao = rs.getLong("carteira_latao");
-        ficha.setCarteira(Carteira.deLatao(saldoLatao));
+        // Moedas físicas por denominação; fichas antigas (coluna vazia) são
+        // migradas a partir do total em latão.
+        String moedasFisicas = null;
+        try {
+            moedasFisicas = rs.getString("carteira_moedas");
+        } catch (SQLException ignored) {}
+        if (moedasFisicas != null && !moedasFisicas.isBlank()) {
+            ficha.setCarteira(Carteira.deMoedasFisicas(moedasFisicas));
+        } else {
+            ficha.setCarteira(Carteira.deLatao(rs.getLong("carteira_latao")));
+        }
 
         // Carregar Perícias
         String sqlPericias = "SELECT pericia, grau, maestria FROM ficha_pericias WHERE ficha_id = ?";
@@ -386,5 +441,110 @@ public class FichaDAO {
         }
 
         return ficha;
+    }
+
+    public static class PericiaDTO {
+        public String pericia;
+        public String nome;
+        public String atributoBase;
+        public int grau;
+        public int maestria;
+        public String descricao;
+        public boolean personalizada;
+    }
+
+    public void salvarPericiaIndividual(long fichaId, String pericia, String nomeExibicao, String atributoBase, int grau, int maestria, String descricao) {
+        String sql = """
+            INSERT INTO ficha_pericias (ficha_id, pericia, grau, maestria, nome_exibicao, atributo_base, descricao)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ficha_id, pericia) DO UPDATE SET
+                grau = excluded.grau,
+                maestria = excluded.maestria,
+                nome_exibicao = excluded.nome_exibicao,
+                atributo_base = excluded.atributo_base,
+                descricao = excluded.descricao
+        """;
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, fichaId);
+            ps.setString(2, pericia);
+            ps.setInt(3, grau);
+            ps.setInt(4, maestria);
+            ps.setString(5, nomeExibicao);
+            ps.setString(6, atributoBase);
+            ps.setString(7, descricao);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao salvar perícia individual no SQLite", e);
+        }
+    }
+
+    public boolean removerPericia(long fichaId, String pericia) {
+        String sql = "DELETE FROM ficha_pericias WHERE ficha_id = ? AND pericia = ?";
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, fichaId);
+            ps.setString(2, pericia);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao remover perícia no SQLite", e);
+        }
+    }
+
+    public List<PericiaDTO> listarPericiasCompletas(long fichaId) {
+        Map<String, PericiaDTO> mapa = new LinkedHashMap<>();
+
+        // 1. Inicializa com as 15 perícias canônicas padrão
+        for (Pericia p : Pericia.values()) {
+            PericiaDTO dto = new PericiaDTO();
+            dto.pericia = p.name();
+            dto.nome = p.getNomeExibicao();
+            dto.atributoBase = p.getAtributoBase().name();
+            dto.grau = 0;
+            dto.maestria = 0;
+            dto.descricao = p.getDescricao();
+            dto.personalizada = false;
+            mapa.put(dto.pericia, dto);
+        }
+
+        // 2. Sobrepõe com valores do banco de dados e adiciona customizadas
+        String sql = "SELECT pericia, grau, maestria, nome_exibicao, atributo_base, descricao FROM ficha_pericias WHERE ficha_id = ?";
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, fichaId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String periciaKey = rs.getString("pericia");
+                    int grau = rs.getInt("grau");
+                    int maestria = rs.getInt("maestria");
+                    String nomeExibicao = rs.getString("nome_exibicao");
+                    String attrBase = rs.getString("atributo_base");
+                    String desc = rs.getString("descricao");
+
+                    if (mapa.containsKey(periciaKey)) {
+                        PericiaDTO existente = mapa.get(periciaKey);
+                        existente.grau = grau;
+                        existente.maestria = maestria;
+                        if (nomeExibicao != null && !nomeExibicao.isBlank()) existente.nome = nomeExibicao;
+                        if (attrBase != null && !attrBase.isBlank()) existente.atributoBase = attrBase;
+                        if (desc != null && !desc.isBlank()) existente.descricao = desc;
+                    } else {
+                        PericiaDTO custom = new PericiaDTO();
+                        custom.pericia = periciaKey;
+                        custom.nome = (nomeExibicao != null && !nomeExibicao.isBlank()) ? nomeExibicao : periciaKey;
+                        custom.atributoBase = (attrBase != null && !attrBase.isBlank()) ? attrBase : "FOR";
+                        custom.grau = grau;
+                        custom.maestria = maestria;
+                        custom.descricao = desc != null ? desc : "";
+                        custom.personalizada = true;
+                        mapa.put(periciaKey, custom);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao carregar perícias da ficha " + fichaId, e);
+        }
+
+        return new ArrayList<>(mapa.values());
     }
 }

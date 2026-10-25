@@ -170,6 +170,7 @@ public class BancoDados {
                 """
                 CREATE TABLE IF NOT EXISTS fichas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL DEFAULT 1,
                     nome TEXT NOT NULL,
                     raca_nome TEXT NOT NULL,
                     vig INTEGER NOT NULL,
@@ -192,6 +193,7 @@ public class BancoDados {
                     carteira_latao INTEGER NOT NULL DEFAULT 0,
                     cidade_id INTEGER,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
                     FOREIGN KEY (raca_nome) REFERENCES racas(nome),
                     FOREIGN KEY (cidade_id) REFERENCES cidades(id)
                 );
@@ -371,7 +373,13 @@ public class BancoDados {
                 "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_2 TEXT",
                 "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_3 TEXT",
                 "ALTER TABLE ficha_monstros_domados ADD COLUMN golpe_slot_4 TEXT",
-                "ALTER TABLE ficha_monstros_domados ADD COLUMN besta_de_carga_ativa INTEGER NOT NULL DEFAULT 1"
+                "ALTER TABLE ficha_monstros_domados ADD COLUMN besta_de_carga_ativa INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE fichas ADD COLUMN imagem_url TEXT",
+                "ALTER TABLE fichas ADD COLUMN usuario_id INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE ficha_pericias ADD COLUMN nome_exibicao TEXT",
+                "ALTER TABLE ficha_pericias ADD COLUMN atributo_base TEXT",
+                "ALTER TABLE ficha_pericias ADD COLUMN descricao TEXT",
+                "ALTER TABLE fichas ADD COLUMN carteira_moedas TEXT"
             };
             for (String colSql : colunasMigracao) {
                 try {
