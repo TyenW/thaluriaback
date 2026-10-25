@@ -8,6 +8,9 @@
 
 # Logs and temporary files
 *.log
+cloudflared.exe
+tunnel.log
 scratch/
 bin/
 out/
+

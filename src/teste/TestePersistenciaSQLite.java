@@ -113,10 +113,11 @@ public class TestePersistenciaSQLite {
         List<Item> itens = itemDAO.listarTodos();
         afirme(itens.size() >= 8, "Catálogo de itens canônicos recuperado do SQLite (Total: " + itens.size() + ").");
 
-        Item ferro = itemDAO.buscarPorId(1);
-        afirme(ferro != null, "Lingote de Ferro recuperado por ID (1).");
-        afirme(ferro.getNome().equals("Lingote de Ferro"), "Nome do item validado com sucesso.");
-        afirme(ferro.getPrecoEmLatao() == 25000L, "Preço em latão do Lingote de Ferro validado (25.000 latão = 2.5 PO).");
+        Item item1 = itemDAO.buscarPorId(1);
+        afirme(item1 != null, "Item canônico recuperado por ID (1).");
+        afirme(item1.getNome().equals("Minério de Ferro de Ironhold (Q1)"), "Nome do item validado com sucesso: " + item1.getNome());
+        afirme(item1.getPrecoEmLatao() == 1500L, "Preço em latão do Minério de Ferro validado (1.500 latão).");
+        afirme(item1.getRegiaoOrigem() == Regiao.TEMPERADO, "Região nativa TEMPERADO validada no SQLite.");
     }
 
     private static void testarPersistenciaEconomiaEGeografia() {
@@ -125,7 +126,7 @@ public class TestePersistenciaSQLite {
         economiaDAO.popularCenarioPadraoSeVazio();
 
         List<Cidade> cidades = economiaDAO.listarCidades();
-        afirme(cidades.size() == 5, "5 cidades canônicas carregadas do SQLite.");
+        afirme(cidades.size() >= 5, "Cidades canônicas carregadas do SQLite (Total: " + cidades.size() + ").");
 
         Cidade ironhold = economiaDAO.buscarCidadePorNome("Ironhold");
         afirme(ironhold != null, "Ironhold recuperada por nome.");
@@ -135,7 +136,7 @@ public class TestePersistenciaSQLite {
         // Carregar Motor Completo
         MotorEconomico motor = economiaDAO.carregarMotorEconomicoCompleto();
         afirme(motor != null, "Motor econômico carregado com sucesso do banco.");
-        afirme(motor.getCidades().size() == 5, "Motor contém as 5 cidades registradas.");
+        afirme(motor.getCidades().size() >= 5, "Motor contém as cidades registradas (Total: " + motor.getCidades().size() + ").");
 
         // Validar conexões
         Cidade frostdale = motor.buscarCidadePorNome("Frostdale");

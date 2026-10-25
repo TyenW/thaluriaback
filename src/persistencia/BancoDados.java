@@ -496,7 +496,13 @@ public class BancoDados {
                 // Ilustrações e descrições do catálogo (data URL ou endereço http/https)
                 "ALTER TABLE monstros_catalogo ADD COLUMN imagem_url TEXT",
                 "ALTER TABLE monstros_catalogo ADD COLUMN descricao TEXT",
-                "ALTER TABLE itens ADD COLUMN imagem_url TEXT"
+                "ALTER TABLE itens ADD COLUMN imagem_url TEXT",
+                // Migração de itens v5 (Colunas regionais, geologia, aquífero e compatibilidade de nomenclaturas)
+                "ALTER TABLE itens ADD COLUMN regiao_nativa TEXT",
+                "ALTER TABLE itens ADD COLUMN geologia_nativa TEXT",
+                "ALTER TABLE itens ADD COLUMN aquifero_nativo TEXT",
+                "ALTER TABLE itens ADD COLUMN preco_base_latao INTEGER",
+                "ALTER TABLE itens ADD COLUMN peso REAL"
             };
             for (String colSql : colunasMigracao) {
                 try {
@@ -505,6 +511,12 @@ public class BancoDados {
                     // Coluna já presente
                 }
             }
+
+            // Sincroniza retrocompatibilidade de preços e pesos entre colunas legadas e v5
+            try {
+                stmt.execute("UPDATE itens SET preco_latao = COALESCE(preco_base_latao, preco_latao), peso_kg = COALESCE(peso, peso_kg) WHERE preco_latao IS NULL OR preco_latao = 0");
+                stmt.execute("UPDATE itens SET preco_base_latao = COALESCE(preco_latao, preco_base_latao), peso = COALESCE(peso_kg, peso) WHERE preco_base_latao IS NULL OR preco_base_latao = 0");
+            } catch (SQLException ignored) {}
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao inicializar esquema do banco SQLite!", e);
         }

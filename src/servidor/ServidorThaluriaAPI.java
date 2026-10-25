@@ -37,6 +37,17 @@ public class ServidorThaluriaAPI {
     private final EconomiaDAO economiaDAO = new EconomiaDAO();
     private final FichaExtrasDAO fichaExtrasDAO = new FichaExtrasDAO();
     private final AdminCrud adminCrud = new AdminCrud();
+    private final SessaoLoginDAO sessaoDAO = new SessaoLoginDAO();
+
+    /** Rotas abertas a quem ainda não entrou. */
+    private static final Set<String> ROTAS_PUBLICAS = Set.of("/api/login", "/api/logout");
+    private static final String ATRIBUTO_PARAMS = "thaluria.params";
+    private static final String ATRIBUTO_SESSAO = "thaluria.sessao";
+
+    /** Tentativas de login falhas por conta: bloqueia após muitas falhas seguidas. */
+    private static final int LOGIN_FALHAS_MAX = 8;
+    private static final long LOGIN_JANELA_MS = 15 * 60 * 1000;
+    private final Map<String, long[]> falhasLogin = new ConcurrentHashMap<>();
 
     private final ControlePermissoesMestre controleMestre;
     // volatile: o painel de gerenciamento recarrega o mundo após editar cidades, rotas ou lojas.
@@ -53,6 +64,7 @@ public class ServidorThaluriaAPI {
             if (tratarCors(exchange)) return;
             totalOperacoes.incrementAndGet();
             try {
+                if (!autorizarPedido(exchange)) return;
                 handler.handle(exchange);
             } catch (Throwable t) {
                 totalFalhas.incrementAndGet();
@@ -69,6 +81,8 @@ public class ServidorThaluriaAPI {
     public ServidorThaluriaAPI(int porta) throws IOException {
         BancoDados.inicializarEsquema();
         usuarioDAO.criarContasPadraoSeVazio();
+        int migradas = usuarioDAO.migrarSenhasEmTextoPuro();
+        if (migradas > 0) System.out.println("  🔒 " + migradas + " senha(s) em texto puro convertida(s) para hash PBKDF2.");
         monstroDAO.popularBestiarioCanonicaSeVazio();
 
         CenarioInicial.DadosCenario cenario = CenarioInicial.criarCenarioPadrao();
@@ -80,6 +94,98 @@ public class ServidorThaluriaAPI {
         configurarRotas();
     }
 
+    /**
+     * Confere o token e as permissões antes de qualquer rota. O papel vem do banco,
+     * nunca do navegador; parâmetros como usuarioId e papel são reescritos para o
+     * jogador não agir em nome de outro. Devolve false se já respondeu com erro.
+     */
+    private boolean autorizarPedido(HttpExchange exchange) throws IOException {
+        Map<String, String> params = lerParametrosDoPedido(exchange);
+        exchange.setAttribute(ATRIBUTO_PARAMS, params);
+        String rota = exchange.getRequestURI().getPath();
+        if (ROTAS_PUBLICAS.contains(rota)) return true;
+
+        SessaoLoginDAO.Sessao sessao = sessaoDAO.validar(tokenDoPedido(exchange));
+        if (sessao == null) {
+            enviarJson(exchange, 401, "{\"erro\":\"Sessão expirada ou inválida. Entre novamente.\"}");
+            return false;
+        }
+        exchange.setAttribute(ATRIBUTO_SESSAO, sessao);
+        // O que cada um enxerga depende do papel gravado no banco, não do que o navegador diz.
+        if ("/api/conteudo/visivel".equals(rota) || "/api/fichas".equals(rota)) params.put("papel", sessao.papel());
+        if (sessao.ehMestre()) return true;
+
+        boolean soMestre = rota.startsWith("/api/admin/") || rota.startsWith("/api/mestre/") || rota.startsWith("/api/fichas/inventario/");
+        if (soMestre) {
+            enviarJson(exchange, 403, "{\"erro\":\"Apenas o Mestre pode fazer isso.\"}");
+            return false;
+        }
+
+        String usuarioId = String.valueOf(sessao.usuarioId());
+        if (rota.startsWith("/api/criacao/")) {
+            params.put("usuarioId", usuarioId);
+            params.put("username", sessao.username());
+        }
+
+        if ("/api/fichas".equals(rota)) {
+            String id = params.getOrDefault("id", "").trim();
+            if (id.isEmpty() || "0".equals(id)) {
+                params.put("usuarioId", usuarioId);
+                return true;
+            }
+            return exigirDonoDaFicha(exchange, sessao, id);
+        }
+        if (rota.startsWith("/api/fichas/")) {
+            String id = "/api/fichas/atualizar".equals(rota) || "/api/fichas/excluir".equals(rota)
+                    ? params.getOrDefault("id", "") : params.getOrDefault("fichaId", "");
+            return exigirDonoDaFicha(exchange, sessao, id);
+        }
+        return true;
+    }
+
+    private boolean exigirDonoDaFicha(HttpExchange exchange, SessaoLoginDAO.Sessao sessao, String idBruto) throws IOException {
+        Integer dono = null;
+        try {
+            dono = sessaoDAO.donoDaFicha(Long.parseLong(idBruto.trim()));
+        } catch (NumberFormatException ignored) {}
+        if (dono == null) {
+            enviarJson(exchange, 404, "{\"erro\":\"Ficha não encontrada\"}");
+            return false;
+        }
+        if (dono != sessao.usuarioId()) {
+            enviarJson(exchange, 403, "{\"erro\":\"Esta ficha pertence a outro jogador.\"}");
+            return false;
+        }
+        return true;
+    }
+
+    private static String tokenDoPedido(HttpExchange exchange) {
+        String cabecalho = exchange.getRequestHeaders().getFirst("Authorization");
+        if (cabecalho == null || !cabecalho.regionMatches(true, 0, "Bearer ", 0, 7)) return null;
+        return cabecalho.substring(7).trim();
+    }
+
+    /** Bloqueio por excesso de senhas erradas; devolve os minutos restantes ou 0. */
+    private long minutosDeBloqueio(String conta) {
+        long[] r = falhasLogin.get(conta);
+        if (r == null) return 0;
+        long passou = System.currentTimeMillis() - r[1];
+        if (passou > LOGIN_JANELA_MS) {
+            falhasLogin.remove(conta);
+            return 0;
+        }
+        return r[0] >= LOGIN_FALHAS_MAX ? Math.max(1, (LOGIN_JANELA_MS - passou) / 60000) : 0;
+    }
+
+    private void registrarFalhaLogin(String conta) {
+        falhasLogin.compute(conta, (k, r) -> {
+            long agora = System.currentTimeMillis();
+            if (r == null || agora - r[1] > LOGIN_JANELA_MS) return new long[] { 1, agora };
+            r[0]++;
+            return r;
+        });
+    }
+
     private void configurarRotas() {
         // 1. Autenticação (Jogador e Mestre)
         criarRota("/api/login", exchange -> {
@@ -87,18 +193,33 @@ public class ServidorThaluriaAPI {
             Map<String, String> params = lerQueryOuForm(exchange);
             String user = params.getOrDefault("username", "");
             String pass = params.getOrDefault("senha", "");
+            String chaveConta = user.trim().toLowerCase(Locale.ROOT);
 
+            long bloqueio = minutosDeBloqueio(chaveConta);
+            if (bloqueio > 0) {
+                enviarJson(exchange, 429, "{\"erro\":\"Muitas tentativas erradas. Tente de novo em " + bloqueio + " min.\"}");
+                return;
+            }
             UsuarioDAO.ContaUsuario conta = usuarioDAO.autenticar(user, pass);
             if (conta == null) {
+                registrarFalhaLogin(chaveConta);
                 enviarJson(exchange, 401, "{\"erro\":\"Credenciais inválidas\"}");
                 return;
             }
+            falhasLogin.remove(chaveConta);
+            String token = sessaoDAO.abrir(conta.getId());
             String json = String.format(Locale.US,
-                "{\"id\":%d,\"username\":\"%s\",\"papel\":\"%s\",\"limiteFichas\":%d,\"pity\":%d}",
+                "{\"id\":%d,\"username\":\"%s\",\"papel\":\"%s\",\"limiteFichas\":%d,\"pity\":%d,\"token\":\"%s\"}",
                 conta.getId(), escapar(conta.getUsername()), conta.getPapel(),
-                conta.getLimiteMaximoFichas(), conta.getFatorSortePity()
+                conta.getLimiteMaximoFichas(), conta.getFatorSortePity(), token
             );
             enviarJson(exchange, 200, json);
+        });
+
+        // 1.1 Encerrar a sessão (invalida o token no servidor)
+        criarRota("/api/logout", exchange -> {
+            sessaoDAO.encerrar(tokenDoPedido(exchange));
+            enviarJson(exchange, 200, "{\"status\":\"ENCERRADA\"}");
         });
 
         // 2. Iniciar Criação de Ficha (Sorteia Humano + 2 Raças com Draconato < 1%).
@@ -927,6 +1048,8 @@ public class ServidorThaluriaAPI {
             int limite = Integer.parseInt(params.getOrDefault("limiteFichas", "2"));
 
             UsuarioDAO.ContaUsuario conta = usuarioDAO.cadastrarUsuario(username, senha, papel, limite);
+            // Senha nova derruba as sessões abertas da conta
+            if (senha != null && !senha.isBlank()) sessaoDAO.encerrarDoUsuario(conta.getId());
             enviarJson(exchange, 200, String.format(
                 "{\"id\":%d,\"username\":\"%s\",\"papel\":\"%s\",\"limiteFichas\":%d}",
                 conta.getId(), escapar(conta.getUsername()), conta.getPapel(), conta.getLimiteMaximoFichas()
@@ -1020,7 +1143,7 @@ public class ServidorThaluriaAPI {
         // o cabeçalho ("*, *") e o navegador bloqueava requisições de outra origem.
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
         if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(204, -1);
             return true;
@@ -1028,7 +1151,14 @@ public class ServidorThaluriaAPI {
         return false;
     }
 
+    /** Parâmetros já lidos (e reescritos) pelo porteiro autorizarPedido; o corpo só pode ser lido uma vez. */
+    @SuppressWarnings("unchecked")
     private Map<String, String> lerQueryOuForm(HttpExchange exchange) throws IOException {
+        Object lidos = exchange.getAttribute(ATRIBUTO_PARAMS);
+        return lidos != null ? (Map<String, String>) lidos : lerParametrosDoPedido(exchange);
+    }
+
+    private Map<String, String> lerParametrosDoPedido(HttpExchange exchange) throws IOException {
         Map<String, String> map = new HashMap<>();
         String query = exchange.getRequestURI().getQuery();
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
