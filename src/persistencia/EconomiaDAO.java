@@ -187,9 +187,14 @@ public class EconomiaDAO {
                     Conexao.TipoDeRota tipo = Conexao.TipoDeRota.valueOf(rs.getString("tipo_rota"));
                     boolean bloqueada = rs.getInt("bloqueada") == 1;
 
-                    Conexao c = new Conexao(orig, dest, dist, perigo, tipo);
-                    if (bloqueada) c.bloquear();
-                    lista.add(c);
+                    try {
+                        Conexao c = new Conexao(orig, dest, dist, perigo, tipo);
+                        if (bloqueada) c.bloquear();
+                        lista.add(c);
+                    } catch (IllegalArgumentException ex) {
+                        // Uma rota inconsistente não pode impedir o mundo de carregar.
+                        System.err.println("[Thaluria] Rota #" + rs.getInt("id") + " ignorada: " + ex.getMessage());
+                    }
                 }
             }
         } catch (SQLException e) {
@@ -524,6 +529,125 @@ public class EconomiaDAO {
      * Sincroniza todas as 34 cidades e rotas canônicas do Atlas SVG de Thalúria no SQLite caso estejam ausentes.
      */
     public void popularCidadesAtlasSeAusentes() {
+        // Roda uma única vez por banco: depois disso o Mestre gerencia cidades e rotas
+        // pelo painel, e o que ele excluir não deve ser recriado a cada inicialização.
+        if (!BancoDados.sementeAplicada("atlas_cidades_v1")) {
+            popularCidadesAtlasInterno();
+            BancoDados.marcarSemente("atlas_cidades_v1");
+        }
+        if (!BancoDados.sementeAplicada("atlas_coordenadas_v1")) {
+            popularCoordenadasMapa();
+            BancoDados.marcarSemente("atlas_coordenadas_v1");
+        }
+        if (!BancoDados.sementeAplicada("rotas_maritimas_v2")) {
+            popularRotasMaritimasExtras();
+            BancoDados.marcarSemente("rotas_maritimas_v2");
+        }
+    }
+
+    /** Completa a malha de navegação costeira entre os portos do continente e das ilhas. */
+    private void popularRotasMaritimasExtras() {
+        Map<String, Cidade> porNome = new HashMap<>();
+        for (Cidade c : listarCidades()) porNome.put(c.getNome().toUpperCase(), c);
+        Object[][] rotas = {
+            { "Thaldrim", "Frostdale", 90, 2 },
+            { "Thaldrim", "Valkar", 120, 2 },
+            { "Moonhaven", "Sunreach", 80, 3 },
+            { "Sunreach", "Cinderport", 260, 5 },
+            { "Varell", "Porto Oakhaven", 160, 4 },
+            { "Cinderport", "Crepúsculo", 260, 5 },
+            { "Noctisport", "Crepúsculo", 420, 6 },
+            { "Tamaris", "Valkar", 290, 4 },
+        };
+        String sqlExiste = "SELECT COUNT(*) FROM conexoes WHERE tipo_rota = 'MARITIMA' AND "
+                + "((origem_id = ? AND destino_id = ?) OR (origem_id = ? AND destino_id = ?))";
+        for (Object[] r : rotas) {
+            Cidade a = porNome.get(((String) r[0]).toUpperCase());
+            Cidade b = porNome.get(((String) r[1]).toUpperCase());
+            if (a == null || b == null || !a.temPorto() || !b.temPorto()) continue;
+            try (Connection conn = BancoDados.getConnection(); PreparedStatement ps = conn.prepareStatement(sqlExiste)) {
+                ps.setInt(1, a.getId()); ps.setInt(2, b.getId()); ps.setInt(3, b.getId()); ps.setInt(4, a.getId());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next() && rs.getInt(1) > 0) continue;
+                }
+            } catch (SQLException e) {
+                throw new RuntimeException("Erro ao verificar rota marítima", e);
+            }
+            salvarConexao(new Conexao(a, b, (Integer) r[2], (Integer) r[3], Conexao.TipoDeRota.MARITIMA));
+        }
+    }
+
+    /** Dados de apresentação no mapa por id de cidade: x, y, reino, icone, descricao (valores podem ser nulos). */
+    public Map<Integer, Map<String, Object>> listarDadosMapa() {
+        Map<Integer, Map<String, Object>> mapa = new HashMap<>();
+        String sql = "SELECT id, mapa_x, mapa_y, reino, icone_mapa, descricao FROM cidades";
+        try (Connection conn = BancoDados.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                double x = rs.getDouble("mapa_x");
+                boolean semX = rs.wasNull();
+                double y = rs.getDouble("mapa_y");
+                boolean semY = rs.wasNull();
+                m.put("x", semX || semY ? null : x);
+                m.put("y", semX || semY ? null : y);
+                m.put("reino", rs.getString("reino"));
+                m.put("icone", rs.getString("icone_mapa"));
+                m.put("descricao", rs.getString("descricao"));
+                mapa.put(rs.getInt("id"), m);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao ler dados do mapa", e);
+        }
+        return mapa;
+    }
+
+    /** Posição (viewBox 1536x1024), reino e ícone de cada cidade canônica no mapa. */
+    private static final Object[][] COORDENADAS_ATLAS = {
+        { "Frosthelm", 553, 187, "frosthelm", "capital" }, { "Thaldrim", 318, 142, "frosthelm", "porto" },
+        { "Valkar", 248, 253, "frosthelm", "porto" }, { "Kelvorn", 725, 222, "frosthelm", "cidade" },
+        { "Eirnhold", 602, 243, "frosthelm", "fortaleza" }, { "Frostdale", 448, 84, "frosthelm", "porto" },
+        { "Ironhold", 650, 275, "frosthelm", "fortaleza" },
+        { "Verdan", 995, 243, "sylvanor", "capital" }, { "Eldergrove", 1043, 98, "sylvanor", "vila" },
+        { "Ravenford", 858, 232, "sylvanor", "cidade" }, { "Willowbrook", 1138, 222, "sylvanor", "vila" },
+        { "Moonhaven", 1262, 236, "sylvanor", "porto" }, { "Stonehollow", 1078, 320, "sylvanor", "cidade" },
+        { "Porto Oakhaven", 1218, 106, "sylvanor", "porto" },
+        { "Aurelia", 437, 452, "aurelia", "capital" }, { "Solara", 315, 345, "aurelia", "cidade" },
+        { "Cedrath", 586, 401, "aurelia", "cidade" }, { "Brisamar", 178, 445, "aurelia", "porto" },
+        { "Valdoria", 498, 548, "aurelia", "cidade" }, { "Tamaris", 282, 610, "aurelia", "porto" },
+        { "Valdorian", 595, 505, "aurelia", "cidade" },
+        { "Drakos", 1252, 470, "drakos", "capital" }, { "Karthul", 1105, 426, "drakos", "cidade" },
+        { "Velgrath", 1397, 443, "drakos", "cidade" }, { "Ravenstoke", 1347, 536, "drakos", "cidade" },
+        { "Cinderport", 1332, 600, "drakos", "porto" }, { "Sunreach", 1272, 286, "drakos", "porto" },
+        { "Valthera", 693, 722, "valthera", "capital" }, { "Caelum", 549, 679, "valthera", "cidade" },
+        { "Duskvale", 810, 702, "valthera", "cidade" }, { "Shadowfen", 553, 791, "valthera", "cidade" },
+        { "Eldenreach", 818, 793, "valthera", "cidade" }, { "Noctisport", 650, 870, "valthera", "porto" },
+        { "Lunara", 1008, 640, "campos", "cidade" }, { "Monteluz", 1108, 668, "campos", "cidade" },
+        { "Ravenspire", 1060, 747, "campos", "fortaleza" }, { "Porto Real", 1250, 755, "campos", "porto" },
+        { "Azzura", 848, 520, "ilhas", "fortaleza" }, { "Varell", 1385, 150, "ilhas", "porto" },
+        { "Crepúsculo", 1225, 905, "ilhas", "porto" },
+    };
+
+    private void popularCoordenadasMapa() {
+        String sql = "UPDATE cidades SET mapa_x = ?, mapa_y = ?, reino = COALESCE(reino, ?), icone_mapa = COALESCE(icone_mapa, ?) "
+                + "WHERE UPPER(nome) = UPPER(?) AND mapa_x IS NULL";
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (Object[] c : COORDENADAS_ATLAS) {
+                ps.setDouble(1, ((Number) c[1]).doubleValue());
+                ps.setDouble(2, ((Number) c[2]).doubleValue());
+                ps.setString(3, (String) c[3]);
+                ps.setString(4, (String) c[4]);
+                ps.setString(5, (String) c[0]);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao gravar coordenadas do mapa", e);
+        }
+    }
+
+    private void popularCidadesAtlasInterno() {
         Map<String, Cidade> cidadesMap = new LinkedHashMap<>();
         int maxId = 0;
         for (Cidade c : listarCidades()) {

@@ -42,6 +42,29 @@ public class BancoDados {
         return getConnection();
     }
 
+    /** Indica se uma carga inicial (semente) já foi aplicada neste banco. */
+    public static boolean sementeAplicada(String chave) {
+        try (Connection conn = getConnection();
+             java.sql.PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM meta_sementes WHERE chave = ?")) {
+            ps.setString(1, chave);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    public static void marcarSemente(String chave) {
+        try (Connection conn = getConnection();
+             java.sql.PreparedStatement ps = conn.prepareStatement("INSERT OR IGNORE INTO meta_sementes (chave) VALUES (?)")) {
+            ps.setString(1, chave);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao registrar semente " + chave, e);
+        }
+    }
+
     /**
      * Inicializa todas as tabelas relacionais do sistema em SQLite (DDL idempotente).
      */
@@ -358,8 +381,87 @@ public class BancoDados {
                 """
         };
 
+        String[] tabelasNovas = {
+            // Sessões de login (só o SHA-256 do token é guardado)
+            """
+            CREATE TABLE IF NOT EXISTS sessoes_login (
+                token_hash TEXT PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                criada_em INTEGER NOT NULL,
+                expira_em INTEGER NOT NULL
+            );
+            """,
+            // Condições ativas no personagem (envenenado, abençoado, exausto...)
+            """
+            CREATE TABLE IF NOT EXISTS ficha_condicoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ficha_id INTEGER NOT NULL,
+                nome TEXT NOT NULL,
+                tipo TEXT NOT NULL DEFAULT 'NEGATIVA',
+                intensidade INTEGER NOT NULL DEFAULT 1,
+                duracao_turnos INTEGER,
+                descricao TEXT,
+                FOREIGN KEY (ficha_id) REFERENCES fichas(id) ON DELETE CASCADE
+            );
+            """,
+            // Magias e técnicas conhecidas pelo personagem
+            """
+            CREATE TABLE IF NOT EXISTS ficha_magias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ficha_id INTEGER NOT NULL,
+                nome TEXT NOT NULL,
+                escola TEXT,
+                elemento TEXT,
+                circulo INTEGER NOT NULL DEFAULT 1,
+                custo_mana INTEGER NOT NULL DEFAULT 0,
+                custo_energia INTEGER NOT NULL DEFAULT 0,
+                alcance_m REAL NOT NULL DEFAULT 0,
+                dado TEXT,
+                tempo_conjuracao TEXT,
+                duracao TEXT,
+                descricao TEXT,
+                preparada INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (ficha_id) REFERENCES fichas(id) ON DELETE CASCADE
+            );
+            """,
+            // Receitas de manufatura (crafting) cadastradas pelo Mestre
+            """
+            CREATE TABLE IF NOT EXISTS receitas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                item_resultado_id INTEGER NOT NULL,
+                quantidade_resultado INTEGER NOT NULL DEFAULT 1,
+                pericia TEXT,
+                grau_minimo INTEGER NOT NULL DEFAULT 0,
+                tempo_horas REAL NOT NULL DEFAULT 1,
+                descricao TEXT,
+                FOREIGN KEY (item_resultado_id) REFERENCES itens(id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS receita_insumos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receita_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (receita_id) REFERENCES receitas(id) ON DELETE CASCADE,
+                FOREIGN KEY (item_id) REFERENCES itens(id)
+            );
+            """,
+            // Marcadores de carga inicial já executada (evita recriar o que o Mestre apagou)
+            """
+            CREATE TABLE IF NOT EXISTS meta_sementes (
+                chave TEXT PRIMARY KEY,
+                aplicada_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        };
+
         try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
             for (String sql : tabelasDdl) {
+                stmt.execute(sql);
+            }
+            for (String sql : tabelasNovas) {
                 stmt.execute(sql);
             }
 
@@ -379,7 +481,22 @@ public class BancoDados {
                 "ALTER TABLE ficha_pericias ADD COLUMN nome_exibicao TEXT",
                 "ALTER TABLE ficha_pericias ADD COLUMN atributo_base TEXT",
                 "ALTER TABLE ficha_pericias ADD COLUMN descricao TEXT",
-                "ALTER TABLE fichas ADD COLUMN carteira_moedas TEXT"
+                "ALTER TABLE fichas ADD COLUMN carteira_moedas TEXT",
+                // Ficha: história e identidade do personagem
+                "ALTER TABLE fichas ADD COLUMN historia TEXT",
+                "ALTER TABLE fichas ADD COLUMN aparencia TEXT",
+                "ALTER TABLE fichas ADD COLUMN personalidade TEXT",
+                "ALTER TABLE fichas ADD COLUMN anotacoes TEXT",
+                // Cidades: posição e apresentação no mapa (viewBox 1536 x 1024)
+                "ALTER TABLE cidades ADD COLUMN mapa_x REAL",
+                "ALTER TABLE cidades ADD COLUMN mapa_y REAL",
+                "ALTER TABLE cidades ADD COLUMN reino TEXT",
+                "ALTER TABLE cidades ADD COLUMN icone_mapa TEXT",
+                "ALTER TABLE cidades ADD COLUMN descricao TEXT",
+                // Ilustrações e descrições do catálogo (data URL ou endereço http/https)
+                "ALTER TABLE monstros_catalogo ADD COLUMN imagem_url TEXT",
+                "ALTER TABLE monstros_catalogo ADD COLUMN descricao TEXT",
+                "ALTER TABLE itens ADD COLUMN imagem_url TEXT"
             };
             for (String colSql : colunasMigracao) {
                 try {

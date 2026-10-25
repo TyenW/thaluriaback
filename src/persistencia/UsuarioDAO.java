@@ -92,7 +92,7 @@ public class UsuarioDAO {
         try (Connection conn = BancoDados.obterConexao();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, username.trim());
-            ps.setString(2, manterSenha ? "123456" : senha);
+            ps.setString(2, Senhas.gerarHash(manterSenha ? "123456" : senha));
             ps.setString(3, papel.toUpperCase());
             ps.setInt(4, Math.max(1, limiteFichas));
             ps.setBoolean(5, manterSenha);
@@ -103,14 +103,35 @@ public class UsuarioDAO {
         }
     }
 
+    /** Troca senhas antigas em texto puro pelo hash. Chamado ao iniciar o servidor. */
+    public int migrarSenhasEmTextoPuro() {
+        Map<Integer, String> antigas = new LinkedHashMap<>();
+        try (Connection conn = BancoDados.obterConexao()) {
+            try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery("SELECT id, senha FROM usuarios")) {
+                while (rs.next()) {
+                    if (!Senhas.ehHash(rs.getString(2))) antigas.put(rs.getInt(1), rs.getString(2));
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE usuarios SET senha = ? WHERE id = ?")) {
+                for (Map.Entry<Integer, String> e : antigas.entrySet()) {
+                    ps.setString(1, Senhas.gerarHash(e.getValue() == null ? "" : e.getValue()));
+                    ps.setInt(2, e.getKey());
+                    ps.executeUpdate();
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao migrar senhas: " + e.getMessage(), e);
+        }
+        return antigas.size();
+    }
+
     public ContaUsuario autenticar(String username, String senha) {
-        String sql = "SELECT id, username, papel, limite_maximo_fichas, fator_sorte_pity FROM usuarios WHERE username = ? AND senha = ?";
+        String sql = "SELECT id, username, papel, limite_maximo_fichas, fator_sorte_pity, senha FROM usuarios WHERE username = ?";
         try (Connection conn = BancoDados.obterConexao();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, username.trim());
-            ps.setString(2, senha);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
+                if (rs.next() && Senhas.conferir(senha, rs.getString("senha"))) {
                     return new ContaUsuario(
                         rs.getInt("id"),
                         rs.getString("username"),

@@ -35,9 +35,12 @@ public class ServidorThaluriaAPI {
     private final MonstroDAO monstroDAO = new MonstroDAO();
     private final PermissoesMestreDAO permissoesDAO = new PermissoesMestreDAO();
     private final EconomiaDAO economiaDAO = new EconomiaDAO();
+    private final FichaExtrasDAO fichaExtrasDAO = new FichaExtrasDAO();
+    private final AdminCrud adminCrud = new AdminCrud();
 
     private final ControlePermissoesMestre controleMestre;
-    private final MotorEconomico motorEconomico;
+    // volatile: o painel de gerenciamento recarrega o mundo após editar cidades, rotas ou lojas.
+    private volatile MotorEconomico motorEconomico;
     private final Map<Integer, SessaoCriacaoFicha> sessoesEmMemoria = new ConcurrentHashMap<>();
 
     @FunctionalInterface
@@ -98,13 +101,21 @@ public class ServidorThaluriaAPI {
             enviarJson(exchange, 200, json);
         });
 
-        // 2. Iniciar Criação de Ficha (Sorteia Humano + 2 Raças com Draconato < 1%)
+        // 2. Iniciar Criação de Ficha (Sorteia Humano + 2 Raças com Draconato < 1%).
+        // Se o jogador já tem uma criação em andamento, ela é retomada: recarregar a
+        // página não pode gerar um novo sorteio nem novas rerolagens.
         criarRota("/api/criacao/iniciar", exchange -> {
             if (tratarCors(exchange)) return;
             Map<String, String> params = lerQueryOuForm(exchange);
             int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "2"));
             String username = params.getOrDefault("username", "jogador1");
             String nomePersonagem = params.getOrDefault("nomePersonagem", "Novo Aventureiro");
+
+            SessaoCriacaoFicha existente = sessoesEmMemoria.get(usuarioId);
+            if (existente != null && existente.getEtapaAtual() != SessaoCriacaoFicha.EtapaCriacao.FINALIZADO) {
+                enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, existente, true));
+                return;
+            }
 
             UsuarioDAO.ContaUsuario conta = usuarioDAO.buscarPorUsername(username);
             int pityAtual = (conta != null) ? conta.getFatorSortePity() : 0;
@@ -117,23 +128,23 @@ public class ServidorThaluriaAPI {
             usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, sessao, null);
             usuarioDAO.atualizarFatorPity(usuarioId, pityAtual + 1);
 
-            StringBuilder racasJson = new StringBuilder("[");
-            List<Raca> sorteadas = sessao.getOpcoesRacaSorteadas();
-            for (int i = 0; i < sorteadas.size(); i++) {
-                if (i > 0) racasJson.append(",");
-                Raca r = sorteadas.get(i);
-                racasJson.append(String.format("{\"id\":\"%s\",\"nome\":\"%s\",\"reino\":\"%s\",\"raridade\":\"%s\"}",
-                        r.getId(), escapar(r.getNome()), escapar(r.getReinoOrigem()), r.getRaridade().name()));
-            }
-            racasJson.append("]");
-
-            enviarJson(exchange, 200, String.format(
-                    "{\"usuarioId\":%d,\"etapa\":\"%s\",\"opcoesRacas\":%s}",
-                    usuarioId, sessao.getEtapaAtual().name(), racasJson
-            ));
+            enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, sessao, false));
         });
 
-        // 3. Jogador Escolhe Raça e Rola Atributos dentro de [min, max]
+        // 2.1 Consultar a criação em andamento do jogador (para retomar ao abrir a página)
+        criarRota("/api/criacao/sessao", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> params = lerQueryOuForm(exchange);
+            int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "0"));
+            SessaoCriacaoFicha sessao = sessoesEmMemoria.get(usuarioId);
+            if (sessao == null || sessao.getEtapaAtual() == SessaoCriacaoFicha.EtapaCriacao.FINALIZADO) {
+                enviarJson(exchange, 200, "{\"ativa\":false}");
+                return;
+            }
+            enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, sessao, true));
+        });
+
+        // 3. Jogador Escolhe Raça e Rola Atributos dentro de [min, max] (máx. 2 rerolagens)
         criarRota("/api/criacao/escolher-raca", exchange -> {
             if (tratarCors(exchange)) return;
             Map<String, String> params = lerQueryOuForm(exchange);
@@ -146,22 +157,19 @@ public class ServidorThaluriaAPI {
                 enviarJson(exchange, 400, "{\"erro\":\"Sessão de criação não iniciada\"}");
                 return;
             }
-            sessao.escolherRacaERolarAtributos(indiceOpcao, new Random());
-            usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, sessao, linhagem);
-
-            StringBuilder attrJson = new StringBuilder("{");
-            int idx = 0;
-            for (Map.Entry<Atributo, Integer> e : sessao.getAtributosRolados().entrySet()) {
-                if (idx++ > 0) attrJson.append(",");
-                attrJson.append("\"").append(e.getKey().name()).append("\":").append(e.getValue());
+            try {
+                sessao.escolherRacaERolarAtributos(indiceOpcao, new Random());
+            } catch (IllegalStateException ex) {
+                enviarJson(exchange, 409, "{\"erro\":\"" + escapar(ex.getMessage()) + "\",\"rerolagensRestantes\":0}");
+                return;
+            } catch (IllegalArgumentException ex) {
+                enviarJson(exchange, 400, "{\"erro\":\"" + escapar(ex.getMessage()) + "\"}");
+                return;
             }
-            attrJson.append("}");
-
-            enviarJson(exchange, 200, String.format(
-                    "{\"racaEscolhida\":\"%s\",\"etapa\":\"%s\",\"atributosRolados\":%s}",
-                    sessao.getRacaEscolhida().getId(), sessao.getEtapaAtual().name(), attrJson
-            ));
+            usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, sessao, linhagem);
+            enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, sessao, false));
         });
+
 
         // 4. Painel do Mestre: Monitorização em Tempo Real de Todas as Fichas em Criação
         criarRota("/api/mestre/sessoes-ao-vivo", exchange -> {
@@ -234,51 +242,74 @@ public class ServidorThaluriaAPI {
                     }
                     golpesJson.append("]");
                     bestiarioJson.append(String.format(
-                        "{\"id\":\"%s\",\"revelado\":true,\"nome\":\"%s\",\"regiao\":\"%s\",\"elemento\":\"%s\",\"porte\":\"%s\",\"golpesPokemon\":%s}",
-                        m.id, escapar(m.nome), m.regiaoNativa.name(), m.elementoPrimario, m.porte, golpesJson
+                        "{\"id\":\"%s\",\"revelado\":true,\"nome\":\"%s\",\"regiao\":\"%s\",\"elemento\":\"%s\",\"elementoSecundario\":%s,\"porte\":\"%s\","
+                            + "\"chefe\":%b,\"domesticavel\":%b,\"imagemUrl\":%s,\"descricao\":%s,\"golpesPokemon\":%s}",
+                        m.id, escapar(m.nome), m.regiaoNativa.name(), m.elementoPrimario, AdminCrud.json(m.elementoSecundario), m.porte,
+                        m.chefeSolo, m.domesticavel, AdminCrud.json(m.imagemUrl), AdminCrud.json(m.descricao), golpesJson
                     ));
                 }
             }
-            // Cidades e Rotas filtradas pelo Fog-of-War do Mestre
-            StringBuilder cidadesJson = new StringBuilder("[");
+            bestiarioJson.append("]");
+
+            // Cidades e Rotas filtradas pelo Fog-of-War do Mestre (com posição no mapa)
+            Map<Integer, Map<String, Object>> dadosMapa = economiaDAO.listarDadosMapa();
+            List<Map<String, Object>> cidadesLista = new ArrayList<>();
+            Set<String> visiveisJogador = new HashSet<>();
             List<geografia.Cidade> cidades = motorEconomico.getMapa().getCidades();
-            for (int i = 0; i < cidades.size(); i++) {
-                if (i > 0) cidadesJson.append(",");
-                geografia.Cidade c = cidades.get(i);
+            for (geografia.Cidade c : cidades) {
+                ControlePermissoesMestre.NivelVisibilidadeMapa visJog = controleMestre.getVisibilidadeCidade(c.getNome());
                 ControlePermissoesMestre.NivelVisibilidadeMapa vis = visaoMestre
-                    ? ControlePermissoesMestre.NivelVisibilidadeMapa.INFORMACOES_COMPLETAS
-                    : controleMestre.getVisibilidadeCidade(c.getNome());
+                    ? ControlePermissoesMestre.NivelVisibilidadeMapa.INFORMACOES_COMPLETAS : visJog;
+                if (visJog != ControlePermissoesMestre.NivelVisibilidadeMapa.OCULTO) visiveisJogador.add(c.getNome());
 
+                Map<String, Object> cm = new LinkedHashMap<>();
                 if (vis == ControlePermissoesMestre.NivelVisibilidadeMapa.OCULTO) {
-                    cidadesJson.append(String.format("{\"nome\":\"???\",\"visibilidade\":\"OCULTO\"}"));
-                } else if (vis == ControlePermissoesMestre.NivelVisibilidadeMapa.ROTA_E_NOME_APENAS) {
-                    cidadesJson.append(String.format("{\"nome\":\"%s\",\"visibilidade\":\"ROTA_E_NOME_APENAS\"}", escapar(c.getNome())));
-                } else {
-                    cidadesJson.append(String.format(
-                        "{\"nome\":\"%s\",\"visibilidade\":\"INFORMACOES_COMPLETAS\",\"visibilidadeJogador\":\"%s\",\"regiao\":\"%s\",\"geologia\":\"%s\",\"aquifero\":\"%s\",\"lojas\":%d}",
-                        escapar(c.getNome()), controleMestre.getVisibilidadeCidade(c.getNome()).name(),
-                        c.getRegiao().name(), c.getGeologia().name(), c.getAquifero().name(), c.getLojas().size()
-                    ));
+                    cm.put("nome", "???");
+                    cm.put("visibilidade", "OCULTO");
+                    cidadesLista.add(cm);
+                    continue;
                 }
+                cm.put("id", c.getId());
+                cm.put("nome", c.getNome());
+                cm.put("visibilidade", vis.name());
+                Map<String, Object> mapa = dadosMapa.getOrDefault(c.getId(), Map.of());
+                cm.put("x", mapa.get("x"));
+                cm.put("y", mapa.get("y"));
+                cm.put("reino", mapa.get("reino"));
+                cm.put("icone", mapa.get("icone"));
+                cm.put("temPorto", c.temPorto());
+                if (vis == ControlePermissoesMestre.NivelVisibilidadeMapa.INFORMACOES_COMPLETAS) {
+                    cm.put("visibilidadeJogador", visJog.name());
+                    cm.put("tipo", c.getTipo().name());
+                    cm.put("regiao", c.getRegiao().name());
+                    cm.put("geologia", c.getGeologia() != null ? c.getGeologia().name() : null);
+                    cm.put("aquifero", c.getAquifero() != null ? c.getAquifero().name() : null);
+                    cm.put("lojas", c.getLojas().size());
+                    cm.put("descricao", mapa.get("descricao"));
+                }
+                cidadesLista.add(cm);
             }
-            cidadesJson.append("]");
+            String cidadesJson = AdminCrud.json(cidadesLista);
 
-            // Rotas / Conexões do Grafo
-            StringBuilder rotasJson = new StringBuilder("[");
+            // Rotas / Conexões do Grafo (o jogador só recebe rotas entre cidades reveladas)
             Set<geografia.Conexao> todasConexoes = new LinkedHashSet<>();
             for (geografia.Cidade c : cidades) {
                 todasConexoes.addAll(c.getConexoes());
             }
-            int rIdx = 0;
+            List<Map<String, Object>> rotasLista = new ArrayList<>();
             for (geografia.Conexao rota : todasConexoes) {
-                if (rIdx++ > 0) rotasJson.append(",");
-                rotasJson.append(String.format(Locale.US,
-                    "{\"origem\":\"%s\",\"destino\":\"%s\",\"distanciaKm\":%d,\"perigo\":%d,\"tipo\":\"%s\",\"bloqueada\":%b}",
-                    escapar(rota.getOrigem().getNome()), escapar(rota.getDestino().getNome()),
-                    rota.getDistanciaKm(), rota.getPerigo(), rota.getTipo().name(), rota.isBloqueada()
-                ));
+                String o = rota.getOrigem().getNome(), d = rota.getDestino().getNome();
+                if (!visaoMestre && !(visiveisJogador.contains(o) && visiveisJogador.contains(d))) continue;
+                Map<String, Object> rm = new LinkedHashMap<>();
+                rm.put("origem", o);
+                rm.put("destino", d);
+                rm.put("distanciaKm", rota.getDistanciaKm());
+                rm.put("perigo", rota.getPerigo());
+                rm.put("tipo", rota.getTipo().name());
+                rm.put("bloqueada", rota.isBloqueada());
+                rotasLista.add(rm);
             }
-            rotasJson.append("]");
+            String rotasJson = AdminCrud.json(rotasLista);
 
             // Capítulos da Wiki liberados
             StringBuilder wikiJson = new StringBuilder("[");
@@ -419,7 +450,7 @@ public class ServidorThaluriaAPI {
                     "\"defFisica\":%d,\"defOculta\":%d,\"imagemUrl\":\"%s\"," +
                     "\"habilidadeInataNome\":\"%s\",\"habilidadeInataDescricao\":\"%s\",\"habilidadeInataDado\":\"%s\"," +
                     "\"habilidadeInataCustoEnergia\":%d,\"habilidadeInataCustoMana\":%d,\"habilidadeInataAlcance\":%.1f," +
-                    "\"pontosEssencia\":%d,\"carteiraLatao\":%d,\"moedas\":%s,\"inventario\":%s," +
+                    "\"pontosEssencia\":%d,\"carteiraLatao\":%d,\"moedas\":%s,\"inventario\":%s,%s," +
                     "\"domados\":%s,\"pericias\":%s}",
                     f.getId(), f.getUsuarioId(), escapar(f.getNome()), escapar(racaNome), escapar(reino),
                     f.getAtributoBase(Atributo.VIGOR), f.getAtributoBase(Atributo.FORCA), f.getAtributoBase(Atributo.DESTREZA),
@@ -432,7 +463,7 @@ public class ServidorThaluriaAPI {
                     inataEnergia, inataMana, inataAlcance,
                     f.getPontosEssencia(),
                     f.getCarteira() != null ? f.getCarteira().getValorTotalEmLatao() : 0L,
-                    moedasJson(f.getCarteira()), inventarioJson(f),
+                    moedasJson(f.getCarteira()), inventarioJson(f), extrasFichaJson(f),
                     domJson, perJson
                 ));
             }
@@ -529,11 +560,28 @@ public class ServidorThaluriaAPI {
                     f.setPontosEssencia(Integer.parseInt(params.get("pontosEssencia")));
                 } catch (Exception ignored) {}
             }
+            if (params.containsKey("cidadeId")) {
+                String bruto = params.get("cidadeId").trim();
+                if (bruto.isEmpty()) {
+                    f.setCidadeAtual(null);
+                } else {
+                    geografia.Cidade cidade = null;
+                    try {
+                        cidade = economiaDAO.buscarCidadePorId(Integer.parseInt(bruto));
+                    } catch (NumberFormatException ignored) {}
+                    if (cidade == null) {
+                        enviarJson(exchange, 400, "{\"erro\":\"Cidade não encontrada\"}");
+                        return;
+                    }
+                    f.setCidadeAtual(cidade);
+                }
+            }
+
 
             fichaDAO.salvar(f);
 
             enviarJson(exchange, 200, String.format(Locale.US,
-                "{\"status\":\"ATUALIZADA\",\"id\":%d,\"nome\":\"%s\",\"imagemUrl\":\"%s\",\"hpAtual\":%d,\"hpMax\":%d,\"sanAtual\":%d,\"sanMax\":%d,\"energiaAtual\":%d,\"energiaMax\":%d,\"manaAtual\":%d,\"manaMax\":%d,\"vig\":%d,\"forca\":%d,\"des\":%d,\"men\":%d,\"esp\":%d,\"von\":%d,\"defFisica\":%d,\"defOculta\":%d,\"carteiraLatao\":%d,\"moedas\":%s,\"pontosEssencia\":%d}",
+                "{\"status\":\"ATUALIZADA\",\"id\":%d,\"nome\":\"%s\",\"imagemUrl\":\"%s\",\"hpAtual\":%d,\"hpMax\":%d,\"sanAtual\":%d,\"sanMax\":%d,\"energiaAtual\":%d,\"energiaMax\":%d,\"manaAtual\":%d,\"manaMax\":%d,\"vig\":%d,\"forca\":%d,\"des\":%d,\"men\":%d,\"esp\":%d,\"von\":%d,\"defFisica\":%d,\"defOculta\":%d,\"carteiraLatao\":%d,\"moedas\":%s,\"pontosEssencia\":%d,\"cidadeAtual\":%s,\"cidadeAtualId\":%s}",
                 f.getId(), escapar(f.getNome()), f.getImagemUrl() != null ? escapar(f.getImagemUrl()) : "",
                 f.getVidaAtual(), f.getVidaMaxima(),
                 f.getSanidadeAtual(), f.getSanidadeMaxima(), f.getEnergiaAtual(), f.getEnergiaMaxima(),
@@ -543,7 +591,9 @@ public class ServidorThaluriaAPI {
                 f.getAtributoBase(Atributo.VON), f.getDefesaFisica(), f.getDefesaOculta(),
                 f.getCarteira() != null ? f.getCarteira().getValorTotalEmLatao() : 0L,
                 moedasJson(f.getCarteira()),
-                f.getPontosEssencia()
+                f.getPontosEssencia(),
+                AdminCrud.json(f.getCidadeAtual() != null ? f.getCidadeAtual().getNome() : null),
+                AdminCrud.json(f.getCidadeAtual() != null ? f.getCidadeAtual().getId() : null)
             ));
         });
 
@@ -623,6 +673,207 @@ public class ServidorThaluriaAPI {
                 "{\"status\":\"REMOVIDA\",\"sucesso\":%b,\"fichaId\":%d,\"pericia\":\"%s\",\"pericias\":%s}",
                 removida, fichaId, periciaKey, perJson
             ));
+        });
+
+        // 9.5 História, aparência, personalidade e anotações da ficha
+        criarRota("/api/fichas/historia/salvar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> params = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(params);
+            if (fichaId <= 0 || fichaDAO.buscarPorId(fichaId) == null) {
+                enviarJson(exchange, 404, "{\"erro\":\"Ficha não encontrada\"}");
+                return;
+            }
+            Map<String, String> valores = new HashMap<>();
+            for (String c : FichaExtrasDAO.CAMPOS_HISTORIA) {
+                if (params.containsKey(c)) valores.put(c, params.get(c));
+            }
+            try {
+                fichaExtrasDAO.salvarHistoria(fichaId, valores);
+            } catch (FichaExtrasDAO.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+                return;
+            }
+            enviarJson(exchange, 200, "{\"status\":\"SALVA\",\"historia\":" + AdminCrud.json(fichaExtrasDAO.lerHistoria(fichaId)) + "}");
+        });
+
+        // 9.6 Condições ativas (salvar, remover, avançar turno)
+        criarRota("/api/fichas/condicoes/salvar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            if (fichaId <= 0 || fichaDAO.buscarPorId(fichaId) == null) {
+                enviarJson(exchange, 404, "{\"erro\":\"Ficha não encontrada\"}");
+                return;
+            }
+            try {
+                String intens = p.getOrDefault("intensidade", "").trim();
+                String dur = p.getOrDefault("duracaoTurnos", "").trim();
+                fichaExtrasDAO.salvarCondicao(fichaId, lerIdOpcional(p.get("id")), p.get("nome"),
+                        p.getOrDefault("tipo", "NEGATIVA").toUpperCase(),
+                        intens.isEmpty() ? 1 : Integer.parseInt(intens),
+                        dur.isEmpty() ? null : Integer.valueOf(dur),
+                        p.get("descricao"));
+            } catch (NumberFormatException ex) {
+                enviarJson(exchange, 400, "{\"erro\":\"Intensidade e duração devem ser números inteiros.\"}");
+                return;
+            } catch (FichaExtrasDAO.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+                return;
+            }
+            enviarJson(exchange, 200, "{\"status\":\"SALVA\",\"condicoes\":" + AdminCrud.json(fichaExtrasDAO.listarCondicoes(fichaId)) + "}");
+        });
+
+        criarRota("/api/fichas/condicoes/remover", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            Long id = lerIdOpcional(p.get("id"));
+            if (fichaId <= 0 || id == null) {
+                enviarJson(exchange, 400, "{\"erro\":\"Parâmetros inválidos\"}");
+                return;
+            }
+            fichaExtrasDAO.remover("ficha_condicoes", fichaId, id);
+            enviarJson(exchange, 200, "{\"status\":\"REMOVIDA\",\"condicoes\":" + AdminCrud.json(fichaExtrasDAO.listarCondicoes(fichaId)) + "}");
+        });
+
+        criarRota("/api/fichas/condicoes/avancar-turno", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            if (fichaId <= 0) {
+                enviarJson(exchange, 400, "{\"erro\":\"ID de ficha inválido\"}");
+                return;
+            }
+            int encerradas = fichaExtrasDAO.avancarTurno(fichaId);
+            enviarJson(exchange, 200, "{\"status\":\"OK\",\"encerradas\":" + encerradas + ",\"condicoes\":"
+                    + AdminCrud.json(fichaExtrasDAO.listarCondicoes(fichaId)) + "}");
+        });
+
+        // 9.7 Magias conhecidas
+        criarRota("/api/fichas/magias/salvar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            if (fichaId <= 0 || fichaDAO.buscarPorId(fichaId) == null) {
+                enviarJson(exchange, 404, "{\"erro\":\"Ficha não encontrada\"}");
+                return;
+            }
+            try {
+                fichaExtrasDAO.salvarMagia(fichaId, lerIdOpcional(p.get("id")), p);
+            } catch (FichaExtrasDAO.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+                return;
+            }
+            enviarJson(exchange, 200, "{\"status\":\"SALVA\",\"magias\":" + AdminCrud.json(fichaExtrasDAO.listarMagias(fichaId)) + "}");
+        });
+
+        criarRota("/api/fichas/magias/remover", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            Long id = lerIdOpcional(p.get("id"));
+            if (fichaId <= 0 || id == null) {
+                enviarJson(exchange, 400, "{\"erro\":\"Parâmetros inválidos\"}");
+                return;
+            }
+            fichaExtrasDAO.remover("ficha_magias", fichaId, id);
+            enviarJson(exchange, 200, "{\"status\":\"REMOVIDA\",\"magias\":" + AdminCrud.json(fichaExtrasDAO.listarMagias(fichaId)) + "}");
+        });
+
+        // 9.8 Inventário: o Mestre concede ou retira itens do catálogo
+        criarRota("/api/fichas/inventario/conceder", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            Long itemId = lerIdOpcional(p.get("itemId"));
+            if (fichaId <= 0 || itemId == null) {
+                enviarJson(exchange, 400, "{\"erro\":\"Informe a ficha e o item.\"}");
+                return;
+            }
+            try {
+                String qtd = p.getOrDefault("quantidade", "1").trim();
+                fichaExtrasDAO.concederItem(fichaId, itemId, qtd.isEmpty() ? 1 : Integer.parseInt(qtd));
+            } catch (NumberFormatException ex) {
+                enviarJson(exchange, 400, "{\"erro\":\"A quantidade deve ser um número inteiro.\"}");
+                return;
+            } catch (FichaExtrasDAO.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+                return;
+            }
+            enviarJson(exchange, 200, "{\"status\":\"CONCEDIDO\",\"inventario\":" + AdminCrud.json(fichaExtrasDAO.listarInventario(fichaId)) + "}");
+        });
+
+        criarRota("/api/fichas/inventario/retirar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            long fichaId = lerFichaId(p);
+            Long itemId = lerIdOpcional(p.get("itemId"));
+            if (fichaId <= 0 || itemId == null) {
+                enviarJson(exchange, 400, "{\"erro\":\"Informe a ficha e o item.\"}");
+                return;
+            }
+            try {
+                // Sem quantidade: remove a pilha inteira.
+                String qtd = p.getOrDefault("quantidade", "").trim();
+                fichaExtrasDAO.retirarItem(fichaId, itemId, qtd.isEmpty() ? null : Integer.valueOf(qtd));
+            } catch (NumberFormatException ex) {
+                enviarJson(exchange, 400, "{\"erro\":\"A quantidade deve ser um número inteiro.\"}");
+                return;
+            } catch (FichaExtrasDAO.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+                return;
+            }
+            enviarJson(exchange, 200, "{\"status\":\"RETIRADO\",\"inventario\":" + AdminCrud.json(fichaExtrasDAO.listarInventario(fichaId)) + "}");
+        });
+
+        // 12. Painel de gerenciamento do Mestre: CRUD genérico (itens, receitas, monstros, cidades, rotas, lojas)
+        criarRota("/api/admin/esquema", exchange -> {
+            if (tratarCors(exchange)) return;
+            enviarJson(exchange, 200, adminCrud.esquemaJson());
+        });
+
+        criarRota("/api/admin/listar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            try {
+                AdminCrud.Entidade e = adminCrud.obter(p.getOrDefault("entidade", ""));
+                enviarJson(exchange, 200, AdminCrud.json(adminCrud.listar(e, p.get("pai"))));
+            } catch (AdminCrud.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+            }
+        });
+
+        criarRota("/api/admin/salvar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            try {
+                AdminCrud.Entidade e = adminCrud.obter(p.getOrDefault("entidade", ""));
+                AdminCrud.Salvo salvo = adminCrud.salvar(e, p);
+                String nomeNovo = p.getOrDefault("nome", "").trim();
+                if ("cidades".equals(e.id) && salvo.nomeAnterior != null && !salvo.nomeAnterior.equals(nomeNovo)) {
+                    // O fog-of-war é guardado pelo nome: leva a visibilidade para o novo nome.
+                    controleMestre.setVisibilidadeCidade(nomeNovo, controleMestre.getVisibilidadeCidade(salvo.nomeAnterior));
+                    permissoesDAO.salvar(controleMestre);
+                }
+                if (e.afetaMundo || "loja_estoque".equals(e.id)) recarregarMundo();
+                enviarJson(exchange, 200, "{\"status\":\"SALVO\",\"id\":" + AdminCrud.json(salvo.id) + "}");
+            } catch (AdminCrud.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+            }
+        });
+
+        criarRota("/api/admin/excluir", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            try {
+                AdminCrud.Entidade e = adminCrud.obter(p.getOrDefault("entidade", ""));
+                adminCrud.excluir(e, p.get("id"));
+                if (e.afetaMundo || "loja_estoque".equals(e.id)) recarregarMundo();
+                enviarJson(exchange, 200, "{\"status\":\"EXCLUIDO\"}");
+            } catch (AdminCrud.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+            }
         });
 
         // 9.4 Excluir Ficha de Personagem (Mestre e Jogador Dono)
@@ -891,6 +1142,82 @@ public class ServidorThaluriaAPI {
         totalFalhas.set(0);
     }
 
+    /** Estado completo da criação de ficha (usado ao iniciar, retomar e rolar atributos). */
+    private String sessaoCriacaoJson(int usuarioId, SessaoCriacaoFicha s, boolean retomada) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ativa", true);
+        m.put("retomada", retomada);
+        m.put("usuarioId", usuarioId);
+        m.put("etapa", s.getEtapaAtual().name());
+        m.put("nomePersonagem", s.getNomePersonagem());
+        List<Map<String, Object>> racas = new ArrayList<>();
+        int indiceEscolhido = -1;
+        List<Raca> opcoes = s.getOpcoesRacaSorteadas();
+        for (int i = 0; i < opcoes.size(); i++) {
+            Raca r = opcoes.get(i);
+            Map<String, Object> rm = new LinkedHashMap<>();
+            rm.put("id", r.getId());
+            rm.put("nome", r.getNome());
+            rm.put("reino", r.getReinoOrigem());
+            rm.put("raridade", r.getRaridade().name());
+            racas.add(rm);
+            if (r.equals(s.getRacaEscolhida())) indiceEscolhido = i;
+        }
+        m.put("opcoesRacas", racas);
+        m.put("racaEscolhida", s.getRacaEscolhida() != null ? s.getRacaEscolhida().getId() : null);
+        m.put("racaEscolhidaNome", s.getRacaEscolhida() != null ? s.getRacaEscolhida().getNome() : null);
+        m.put("indiceRacaEscolhida", indiceEscolhido);
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        for (Map.Entry<Atributo, Integer> e : s.getAtributosRolados().entrySet()) attrs.put(e.getKey().name(), e.getValue());
+        m.put("atributosRolados", attrs);
+        m.put("rerolagensPermitidas", s.getRerolagensPermitidas());
+        m.put("rerolagensRestantes", s.getRerolagensRestantes());
+        return AdminCrud.json(m);
+    }
+
+    /**
+     * Campos extras da ficha como fragmento JSON (sem chaves externas):
+     * cidade atual, história, condições e magias.
+     */
+    private String extrasFichaJson(Ficha f) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("cidadeAtual", f.getCidadeAtual() != null ? f.getCidadeAtual().getNome() : null);
+        m.put("cidadeAtualId", f.getCidadeAtual() != null ? f.getCidadeAtual().getId() : null);
+        m.put("historia", fichaExtrasDAO.lerHistoria(f.getId()));
+        m.put("condicoes", fichaExtrasDAO.listarCondicoes(f.getId()));
+        m.put("magias", fichaExtrasDAO.listarMagias(f.getId()));
+        String objeto = AdminCrud.json(m);
+        return objeto.substring(1, objeto.length() - 1);
+    }
+
+    private static long lerFichaId(Map<String, String> params) {
+        try {
+            return Long.parseLong(params.getOrDefault("fichaId", "0").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static Long lerIdOpcional(String bruto) {
+        if (bruto == null || bruto.isBlank()) return null;
+        try {
+            return Long.valueOf(bruto.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Recarrega cidades, rotas e lojas do banco após alterações feitas no painel. */
+    private synchronized void recarregarMundo() {
+        MotorEconomico anterior = this.motorEconomico;
+        MotorEconomico novo = economiaDAO.carregarMotorEconomicoCompleto();
+        if (anterior != null) {
+            novo.setDiaAtual(anterior.getDiaAtual());
+            novo.setHoraAtual(anterior.getHoraAtual());
+        }
+        this.motorEconomico = novo;
+    }
+
     /** Quantidade física de cada moeda, ex.: {"LATAO":0,...,"OURO":10,...}. */
     private String moedasJson(Carteira carteira) {
         StringBuilder sb = new StringBuilder("{");
@@ -901,17 +1228,9 @@ public class ServidorThaluriaAPI {
         return sb.append("}").toString();
     }
 
+    /** Lido direto do banco para incluir a ilustração do item, que a classe Item não carrega. */
     private String inventarioJson(Ficha f) {
-        StringBuilder sb = new StringBuilder("[");
-        for (Item item : f.getInventario()) {
-            if (sb.length() > 1) sb.append(",");
-            sb.append(String.format(Locale.US,
-                "{\"id\":%d,\"nome\":\"%s\",\"descricao\":\"%s\",\"precoLatao\":%d,\"pesoKg\":%.2f,\"tipo\":\"%s\",\"raridade\":\"%s\",\"quantidade\":%d}",
-                item.getId(), escapar(item.getNome()), escapar(item.getDescricao()),
-                item.getPrecoEmLatao(), item.getPeso(), item.getTipo().name(), item.getRaridade().name(), item.getQuantidade()
-            ));
-        }
-        return sb.append("]").toString();
+        return AdminCrud.json(fichaExtrasDAO.listarInventario(f.getId()));
     }
 
     /** Escapa texto para uso dentro de uma string JSON (aspas, barras e quebras de linha). */

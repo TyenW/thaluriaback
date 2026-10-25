@@ -93,6 +93,8 @@ public class MonstroDAO {
         public boolean domesticavel;
         public boolean chefeSolo;
         public int multiplicadorHpChefe;
+        public String imagemUrl;
+        public String descricao;
         public List<GolpePokemonDTO> learnset = new ArrayList<>();
         public List<DropMonstroDTO> drops = new ArrayList<>();
     }
@@ -320,6 +322,8 @@ public class MonstroDAO {
                 m.domesticavel = rs.getInt("domesticavel") == 1;
                 m.chefeSolo = rs.getInt("chefe_solo") == 1;
                 m.multiplicadorHpChefe = rs.getInt("multiplicador_hp_chefe");
+                m.imagemUrl = rs.getString("imagem_url");
+                m.descricao = rs.getString("descricao");
                 carregarGolpesEDrops(conn, m);
                 lista.add(m);
             }

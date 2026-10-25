@@ -116,12 +116,41 @@ public class SessaoCriacaoFicha {
         return executarSorteioRacas(fatorSorte, false, r);
     }
 
+    /** Rerolagens de atributos que todo jogador tem na criação (além das concedidas pelo Mestre). */
+    public static final int REROLAGENS_PADRAO = 2;
+
+    /** Quantas vezes os atributos já foram rolados pelo jogador nesta sessão (a 1ª não é rerolagem). */
+    private int rolagensRealizadas = 0;
+
+    public int getRerolagensPermitidas() {
+        return REROLAGENS_PADRAO + rascunho.getRerollsAssistidosDisponiveis();
+    }
+
+    public int getRerolagensUsadas() {
+        return Math.max(0, rolagensRealizadas - 1);
+    }
+
+    public int getRerolagensRestantes() {
+        return Math.max(0, getRerolagensPermitidas() - getRerolagensUsadas());
+    }
+
+    /**
+     * Escolhe a raça e rola os atributos. Toda rolagem após a primeira conta como
+     * rerolagem, inclusive ao trocar de raça (senão trocar de raça daria rerolagens infinitas).
+     *
+     * @throws IllegalStateException se as rerolagens acabaram
+     */
     public void escolherRacaERolarAtributos(int indiceOpcao, Random r) {
         List<Raca> opcoes = getOpcoesRacaSorteadas();
-        if (indiceOpcao >= 0 && indiceOpcao < opcoes.size()) {
-            escolherRaca(opcoes.get(indiceOpcao));
-            rolarAtributosIniciais(r);
+        if (indiceOpcao < 0 || indiceOpcao >= opcoes.size()) {
+            throw new IllegalArgumentException("Opção de raça inválida");
         }
+        if (rolagensRealizadas > 0 && getRerolagensRestantes() <= 0) {
+            throw new IllegalStateException("As " + getRerolagensPermitidas() + " rerolagens de atributos desta criação já foram usadas");
+        }
+        escolherRaca(opcoes.get(indiceOpcao));
+        rolarAtributosIniciais(r);
+        rolagensRealizadas++;
     }
 
     public void enviarDicaDoMestre(String dica) {

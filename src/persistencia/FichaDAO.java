@@ -310,6 +310,7 @@ public class FichaDAO {
                     ps3.setLong(2, id);
                     ps3.executeUpdate();
                 }
+                new FichaExtrasDAO().excluirDaFicha(conn, id);
                 boolean deletou;
                 try (PreparedStatement psFicha = conn.prepareStatement("DELETE FROM fichas WHERE id = ?")) {
                     psFicha.setLong(1, id);
@@ -359,6 +360,12 @@ public class FichaDAO {
         try {
             ficha.setImagemUrl(rs.getString("imagem_url"));
         } catch (SQLException ignored) {}
+
+        // Cidade atual: sem carregá-la, o próximo salvar gravava cidade_id = NULL.
+        int cidadeId = rs.getInt("cidade_id");
+        if (!rs.wasNull() && cidadeId > 0) {
+            ficha.setCidadeAtual(new EconomiaDAO().buscarCidadePorId(cidadeId));
+        }
 
         // Moedas físicas por denominação; fichas antigas (coluna vazia) são
         // migradas a partir do total em latão.
