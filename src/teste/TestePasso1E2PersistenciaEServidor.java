@@ -72,7 +72,7 @@ public class TestePasso1E2PersistenciaEServidor {
         usuarioDAO.criarContasPadraoSeVazio();
 
         // 1.1 Autenticação Mestre e Jogador
-        UsuarioDAO.ContaUsuario mestre = usuarioDAO.autenticar("mestre", "thaluriaadmin");
+        UsuarioDAO.ContaUsuario mestre = usuarioDAO.autenticar("mestre", "Senha14933");
         afirme(mestre != null, "Conta do mestre autenticada com sucesso.");
         afirme(mestre.isMestre(), "Conta do mestre possui papel MESTRE.");
         afirme(mestre.getLimiteMaximoFichas() == 999, "Limite de fichas do mestre é 999.");
@@ -172,10 +172,15 @@ public class TestePasso1E2PersistenciaEServidor {
 
         try {
             // 3.1 POST /api/login (Sucesso)
-            String loginPayload = "username=mestre&senha=thaluriaadmin";
+            String loginPayload = "username=mestre&senha=Senha14933";
             HttpResposta respLogin = enviarRequisicao("POST", "http://localhost:" + porta + "/api/login", loginPayload);
             afirme(respLogin.codigo == 200, "POST /api/login mestre respondeu 200 OK.");
             afirme(respLogin.corpo.contains("\"papel\":\"MESTRE\""), "Login retornou papel MESTRE.");
+            if (respLogin.corpo.contains("\"token\":\"")) {
+                int start = respLogin.corpo.indexOf("\"token\":\"") + 9;
+                int end = respLogin.corpo.indexOf("\"", start);
+                tokenAtual = respLogin.corpo.substring(start, end);
+            }
 
             // 3.2 POST /api/login (Credencial Inválida)
             HttpResposta respLoginInvalido = enviarRequisicao("POST", "http://localhost:" + porta + "/api/login", "username=x&senha=y");
@@ -210,6 +215,18 @@ public class TestePasso1E2PersistenciaEServidor {
             HttpResposta respAprovar = enviarRequisicao("POST", "http://localhost:" + porta + "/api/mestre/assistir-sessao", aprovarPayload);
             afirme(respAprovar.codigo == 200, "POST /api/mestre/assistir-sessao (APROVAR) respondeu 200 OK.");
 
+            String tokenMestre = tokenAtual;
+
+            // Login jogador1 para testar visão com Fog of War
+            HttpResposta respLoginJog = enviarRequisicao("POST", "http://localhost:" + porta + "/api/login", "username=jogador1&senha=123456");
+            String tokenJogador = null;
+            if (respLoginJog.corpo.contains("\"token\":\"")) {
+                int start = respLoginJog.corpo.indexOf("\"token\":\"") + 9;
+                int end = respLoginJog.corpo.indexOf("\"", start);
+                tokenJogador = respLoginJog.corpo.substring(start, end);
+            }
+            tokenAtual = tokenJogador;
+
             // 3.8 GET /api/conteudo/visivel (Visão Jogador: Fog of War ativado)
             HttpResposta respConteudoJogador = enviarRequisicao("GET", "http://localhost:" + porta + "/api/conteudo/visivel?papel=JOGADOR", null);
             afirme(respConteudoJogador.codigo == 200, "GET /api/conteudo/visivel (JOGADOR) respondeu 200 OK.");
@@ -219,13 +236,16 @@ public class TestePasso1E2PersistenciaEServidor {
             afirme(respConteudoJogador.corpo.contains("capitulosWiki"), "Resposta contém lista de capítulos liberados da Wiki.");
 
             // 3.9 POST /api/mestre/controle-mundo (Avançar Dia e Revelar Monstro)
+            tokenAtual = tokenMestre;
             String revelarPayload = "acao=REVELAR_MONSTRO&monstroId=LOBO_GLACIAL_FROSTDALE";
             HttpResposta respRevelar = enviarRequisicao("POST", "http://localhost:" + porta + "/api/mestre/controle-mundo", revelarPayload);
             afirme(respRevelar.codigo == 200, "POST /api/mestre/controle-mundo (REVELAR_MONSTRO) respondeu 200 OK.");
 
+            tokenAtual = tokenJogador;
             HttpResposta respConteudoJogadorApos = enviarRequisicao("GET", "http://localhost:" + porta + "/api/conteudo/visivel?papel=JOGADOR", null);
             afirme(respConteudoJogadorApos.corpo.contains("Lobo Glacial de Frostdale"), "Monstro revelado agora aparece com nome e golpes Pokémon para o jogador!");
 
+            tokenAtual = tokenMestre;
             String avancarPayload = "acao=AVANCAR_DIA&dias=2";
             HttpResposta respAvancar = enviarRequisicao("POST", "http://localhost:" + porta + "/api/mestre/controle-mundo", avancarPayload);
             afirme(respAvancar.codigo == 200, "POST /api/mestre/controle-mundo (AVANCAR_DIA) respondeu 200 OK.");
@@ -263,12 +283,18 @@ public class TestePasso1E2PersistenciaEServidor {
         HttpResposta(int c, String b) { this.codigo = c; this.corpo = b; }
     }
 
+    private static String tokenAtual = null;
+
     private static HttpResposta enviarRequisicao(String metodo, String urlStr, String body) throws Exception {
         URI uri = new URI(urlStr);
         HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
         conn.setRequestMethod(metodo);
         conn.setConnectTimeout(5000);
         conn.setReadTimeout(5000);
+
+        if (tokenAtual != null && !tokenAtual.isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + tokenAtual);
+        }
 
         if (body != null && !body.isEmpty()) {
             conn.setDoOutput(true);

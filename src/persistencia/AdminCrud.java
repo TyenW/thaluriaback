@@ -43,6 +43,8 @@ public class AdminCrud {
         public boolean naLista;
         /** Seção do formulário em que o campo aparece (ex.: "Atributos base"). */
         public String grupo;
+        /** Coluna booleana que precisa estar marcada para o campo aparecer (ex.: nome da rede só se for de rede). */
+        public String visivelSe;
 
         Campo(String coluna, String rotulo, TipoCampo tipo) {
             this.coluna = coluna;
@@ -56,6 +58,7 @@ public class AdminCrud {
         Campo ajuda(String a) { this.ajuda = a; return this; }
         Campo padrao(Object p) { this.padrao = p; return this; }
         Campo lista() { this.naLista = true; return this; }
+        Campo visivelSe(String colunaBooleana) { this.visivelSe = colunaBooleana; return this; }
     }
 
     public static final class Entidade {
@@ -71,6 +74,8 @@ public class AdminCrud {
         /** Entidade-mãe para registros filhos (ex.: golpes de um monstro). */
         public String pai;
         public String colunaPai;
+        /** Registros filhos: coluna booleana do pai que precisa estar marcada para a sublista aparecer. */
+        public String visivelSePai;
         /** Alterações exigem recarregar cidades/rotas/lojas em memória. */
         public boolean afetaMundo;
         public String descricao;
@@ -145,6 +150,30 @@ public class AdminCrud {
                 .ajuda("Preço de referência em latão (1 PO = 10.000 latão).");
         itens.campo("peso_kg", "Peso (kg)", TipoCampo.REAL).obrigatorio().minimo(0).padrao(0).lista();
         itens.campo("tier", "Tier", TipoCampo.INTEIRO).obrigatorio().faixa(1, 10).padrao(1);
+        itens.grupo("Forja");
+        itens.enumCampo("categoria_material", "Categoria de material", economia.ForjaArmas.CategoriaMaterial.values()).visivelSe("tipo=MATERIAL")
+                .ajuda("Diz em que partes de arma o material entra (cada parte do molde aceita certas categorias).");
+        itens.campo("bonus_dano", "Bônus de dano", TipoCampo.REAL).padrao(0).visivelSe("tipo=MATERIAL")
+                .ajuda("Somado ao dano da arma (uma liga usa a média dos metais).");
+        itens.campo("durabilidade", "Durabilidade", TipoCampo.REAL).minimo(0).padrao(0).visivelSe("tipo=MATERIAL")
+                .ajuda("A arma dura o que dura a peça mais fraca.");
+        itens.grupo("Origem");
+        itens.campo("coletavel", "Coletável", TipoCampo.BOOLEANO).padrao(false)
+                .ajuda("Pode ser achado no mundo. Cadastre onde e com que chance em \"Locais de coleta\". Um item pode ser coletável e também dropado ou craftado.");
+
+        Entidade locais = nova("item_locais_coleta", "Locais de coleta", "item_locais_coleta", "id");
+        locais.chaveAuto = true;
+        locais.pai = "itens";
+        locais.colunaPai = "item_id";
+        locais.visivelSePai = "coletavel";
+        locais.descricao = "Onde o item é achado. Campos vazios valem para qualquer lugar; escolha uma cidade para restringir a ela.";
+        locais.ref("cidade_id", "Cidade", "cidades").lista().ajuda("Opcional: restringe a coleta aos arredores desta cidade.");
+        locais.enumCampo("regiao", "Região", Regiao.values()).lista();
+        locais.enumCampo("geologia", "Geologia", Geologia.values()).lista();
+        locais.enumCampo("aquifero", "Aquífero", Aquifero.values());
+        locais.campo("probabilidade", "Chance de achar (0 a 1)", TipoCampo.REAL).obrigatorio().faixa(0, 1).padrao(0.5).lista();
+        locais.campo("qtd_min", "Qtd. mínima", TipoCampo.INTEIRO).obrigatorio().faixa(1, 999).padrao(1).lista();
+        locais.campo("qtd_max", "Qtd. máxima", TipoCampo.INTEIRO).obrigatorio().faixa(1, 999).padrao(1).lista();
 
         // ---------------- Receitas ----------------
         Entidade receitas = nova("receitas", "Receitas", "receitas", "id");
@@ -157,6 +186,8 @@ public class AdminCrud {
         receitas.campo("pericia", "Perícia exigida", TipoCampo.TEXTO).ajuda("Ex.: Medicina / Alquimia, Atletismo, Ferraria…");
         receitas.campo("grau_minimo", "Grau mínimo", TipoCampo.INTEIRO).obrigatorio().faixa(0, 20).padrao(0);
         receitas.campo("tempo_horas", "Tempo (horas)", TipoCampo.REAL).obrigatorio().minimo(0).padrao(1).lista();
+        receitas.enumCampo("tipo_loja", "Feita em", Lojas.TipoEstabelecimento.values()).lista()
+                .ajuda("Especialidade de loja que produz esta receita sozinha. Vazio = qualquer loja.");
         receitas.campo("descricao", "Descrição", TipoCampo.TEXTO_LONGO);
 
         Entidade insumos = nova("receita_insumos", "Insumos", "receita_insumos", "id");
@@ -215,8 +246,7 @@ public class AdminCrud {
         drops.chaveAuto = true;
         drops.pai = "monstros";
         drops.colunaPai = "monstro_catalogo_id";
-        drops.colunaTitulo = "item_nome";
-        drops.campo("item_nome", "Item", TipoCampo.TEXTO).obrigatorio().lista();
+        drops.ref("item_id", "Item", "itens").obrigatorio().lista().ajuda("Item do catálogo. Crie o item em Itens antes, se ainda não existir.");
         drops.campo("probabilidade", "Probabilidade (0 a 1)", TipoCampo.REAL).obrigatorio().faixa(0, 1).padrao(0.5).lista();
         drops.campo("qtd_min", "Qtd. mínima", TipoCampo.INTEIRO).obrigatorio().faixa(0, 999).padrao(1).lista();
         drops.campo("qtd_max", "Qtd. máxima", TipoCampo.INTEIRO).obrigatorio().faixa(0, 999).padrao(1).lista();
@@ -267,8 +297,10 @@ public class AdminCrud {
         lojas.ref("cidade_id", "Cidade", "cidades").obrigatorio().lista();
         lojas.enumCampo("tipo", "Tipo", Lojas.TipoEstabelecimento.values()).obrigatorio().padrao("LOJA_GERAL").lista();
         lojas.campo("caixa_latao", "Caixa (latão)", TipoCampo.INTEIRO).obrigatorio().minimo(0).padrao(0);
+        lojas.campo("nivel", "Nível da oficina", TipoCampo.INTEIRO).obrigatorio().faixa(1, 5).padrao(3);
         lojas.campo("e_rede", "Faz parte de uma rede", TipoCampo.BOOLEANO).padrao(false);
-        lojas.campo("nome_rede", "Nome da rede", TipoCampo.TEXTO);
+        lojas.campo("nome_rede", "Nome da rede", TipoCampo.TEXTO).visivelSe("e_rede")
+                .ajuda("Lojas da mesma rede se abastecem entre si.");
 
         Entidade estoque = nova("loja_estoque", "Estoque", "loja_estoque", "rowid");
         estoque.chaveAuto = true;
@@ -531,10 +563,15 @@ public class AdminCrud {
                 if (repetidas > 0) throw new ErroValidacao("Já existe uma rota desse tipo entre essas cidades.");
             }
             case "monstro_drops" -> {
-                Object min = v.get("qtd_min"), max = v.get("qtd_max");
-                if (min instanceof Long a && max instanceof Long b && a > b) {
-                    throw new ErroValidacao("A quantidade mínima não pode ser maior que a máxima.");
-                }
+                validarQuantidades(v);
+                String nomeItem = lerTexto(conn, "SELECT nome FROM itens WHERE id = ?", v.get("item_id"));
+                if (nomeItem == null) throw new ErroValidacao("Item não encontrado.");
+                // Coluna legada, mantida para quem ainda lê o drop pelo nome
+                v.put("item_nome", nomeItem);
+            }
+            case "item_locais_coleta" -> {
+                validarQuantidades(v);
+                if (v.get("cidade_id") != null && !existeCidade(conn, v.get("cidade_id"))) throw new ErroValidacao("Cidade não encontrada.");
             }
             case "receitas" -> {
                 if (!existeId(conn, "itens", v.get("item_resultado_id"))) throw new ErroValidacao("Item produzido não encontrado.");
@@ -544,8 +581,17 @@ public class AdminCrud {
             }
             case "lojas" -> {
                 if (!existeCidade(conn, v.get("cidade_id"))) throw new ErroValidacao("Cidade não encontrada.");
+                if (!Boolean.TRUE.equals(v.get("e_rede"))) v.put("nome_rede", null);
+                else if (v.get("nome_rede") == null) throw new ErroValidacao("Informe o nome da rede (ou desmarque \"Faz parte de uma rede\").");
             }
             default -> { }
+        }
+    }
+
+    private static void validarQuantidades(Map<String, Object> v) {
+        Object min = v.get("qtd_min"), max = v.get("qtd_max");
+        if (min instanceof Long a && max instanceof Long b && a > b) {
+            throw new ErroValidacao("A quantidade mínima não pode ser maior que a máxima.");
         }
     }
 
@@ -568,10 +614,13 @@ public class AdminCrud {
                                 + lerLong(conn, "SELECT COUNT(*) FROM receita_insumos WHERE item_id = ?", id);
                         long inv = lerLong(conn, "SELECT COUNT(*) FROM ficha_inventario WHERE item_id = ?", id);
                         long est = lerLong(conn, "SELECT COUNT(*) FROM loja_estoque WHERE item_id = ?", id);
+                        long drp = lerLong(conn, "SELECT COUNT(*) FROM monstro_drops WHERE item_id = ?", id);
                         if (r > 0) usos.add(r + " receita(s)");
                         if (inv > 0) usos.add("inventário de " + inv + " ficha(s)");
                         if (est > 0) usos.add("estoque de " + est + " loja(s)");
+                        if (drp > 0) usos.add("drop de " + drp + " monstro(s)");
                         if (!usos.isEmpty()) throw new ErroValidacao("Item em uso: " + String.join(", ", usos) + ". Remova esses usos antes.");
+                        executar(conn, "DELETE FROM item_locais_coleta WHERE item_id = ?", id);
                     }
                     case "receitas" -> executar(conn, "DELETE FROM receita_insumos WHERE receita_id = ?", id);
                     case "monstros" -> {
@@ -718,6 +767,7 @@ public class AdminCrud {
             m.put("colunaTitulo", e.colunaTitulo);
             m.put("pai", e.pai);
             m.put("colunaPai", e.colunaPai);
+            m.put("visivelSePai", e.visivelSePai);
             m.put("afetaMundo", e.afetaMundo);
             List<Map<String, Object>> campos = new ArrayList<>();
             for (Campo c : e.campos) {
@@ -734,6 +784,7 @@ public class AdminCrud {
                 cm.put("padrao", c.padrao);
                 cm.put("naLista", c.naLista);
                 cm.put("grupo", c.grupo);
+                cm.put("visivelSe", c.visivelSe);
                 campos.add(cm);
             }
             m.put("campos", campos);

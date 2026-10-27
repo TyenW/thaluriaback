@@ -66,6 +66,11 @@ public class Lojas {
     private final Map<Integer, Integer> entradasRecentes = new LinkedHashMap<>();
     private final Map<Integer, Integer> saidasRecentes = new LinkedHashMap<>();
     private final List<RegistroMovimentacao> historico = new ArrayList<>();
+    /** Quantos registros do histórico já foram gravados no livro-caixa do banco. */
+    private int historicoPersistido = 0;
+
+    // Produção por receitas do catálogo (ReceitaLoja), persistida em loja_ordens_producao
+    private final List<OrdemReceita> ordensReceita = new ArrayList<>();
 
     public Lojas() {
         this("Empório Geral", "Mercador Local", false, null, TipoEstabelecimento.LOJA_GERAL);
@@ -394,11 +399,7 @@ public class Lojas {
     }
 
     public boolean processarCraftingDiario(int dia, int hora) {
-        // Extração diária de minérios se for Forja com gerador de mineradores ativo
-        if (this.tipoEstabelecimento == TipoEstabelecimento.FORJA && this.geradorMineracao != null && this.cidadeSede != null) {
-            this.geradorMineracao.extrairMineriosDoDia(this, this.cidadeSede.getVeiosMineraisDisponiveis(), dia, hora, new Random());
-        }
-
+        // A extração de minérios da forja acontece uma vez por dia em processarCicloDiarioV6.
         boolean fabricouAlgo = false;
         for (MoldeReceita molde : new ArrayList<>(livroDeReceitas)) {
             Item feito = fabricarComMolde(molde, null, dia, hora);
@@ -596,8 +597,8 @@ public class Lojas {
             return false;
         }
 
-        // Verifica materiais
-        List<Item> consumidos = new ArrayList<>();
+        // Confere todos os materiais antes de consumir: faltando um, nada sai do estoque
+        Map<FiltroInsumoReceita, Item> escolhidos = new LinkedHashMap<>();
         for (FiltroInsumoReceita filtro : molde.getFiltrosInsumo()) {
             Item selecionado = null;
             for (Item cand : estoque) {
@@ -610,10 +611,13 @@ public class Lojas {
                 caixa.receberLatao(molde.getCustoMaoDeObraEmLatao());
                 return false;
             }
-            if (selecionado != null) {
-                removerItem(selecionado.getId(), filtro.getQuantidadeExigida());
-                consumidos.add(clonarItem(selecionado, filtro.getQuantidadeExigida()));
-            }
+            if (selecionado != null) escolhidos.put(filtro, selecionado);
+        }
+        List<Item> consumidos = new ArrayList<>();
+        for (Map.Entry<FiltroInsumoReceita, Item> e : escolhidos.entrySet()) {
+            int qtd = e.getKey().getQuantidadeExigida();
+            consumidos.add(clonarItem(e.getValue(), qtd));
+            removerItem(e.getValue().getId(), qtd);
         }
 
         int idResultado = molde.getIdMolde() * 100 + proximoIdOrdem;
@@ -662,6 +666,12 @@ public class Lojas {
         Iterator<LotePrateleira> it = lotesPrateleira.iterator();
         while (it.hasNext()) {
             LotePrateleira lote = it.next();
+            // Clientes podem ter levado parte do lote no balcão; sem isso a roleta pagaria por itens já vendidos
+            lote.limitarQuantidade(getQuantidadeEstoque(lote.getItem().getId()));
+            if (lote.getQuantidade() <= 0) {
+                it.remove();
+                continue;
+            }
             boolean liquidou = lote.avancarDiaEResolver(this, dia, hora, random);
             if (liquidou || lote.isVendidoOuLiquidado()) {
                 it.remove();
@@ -680,11 +690,12 @@ public class Lojas {
             for (Item itemVenda : new ArrayList<>(especializada.getEstoque())) {
                 if (itemVenda.getTipo() == Item.TipoItem.MATERIAL) continue;
                 if (itemVenda.getQuantidade() < 2) continue;
+                if (getQuantidadeEstoque(itemVenda.getId()) >= estoqueAlvo(itemVenda.getId())) continue;
 
                 long precoVendaNormal = especializada.calcularPrecoDinamicoVendaEmLatao(itemVenda);
                 long precoAtacado = (long) Math.floor(precoVendaNormal * 0.85);
 
-                if (this.caixa.getValorTotalEmLatao() >= precoAtacado * 2) {
+                if (caixaDisponivelParaCompras() >= precoAtacado * 2) {
                     int qtdComprada = Math.min(2, itemVenda.getQuantidade() - 1);
                     long totalPago = precoAtacado * qtdComprada;
 
@@ -699,7 +710,7 @@ public class Lojas {
                                 itemVenda.getNome(), qtdComprada, totalPago,
                                 "Venda B2B Atacado para " + this.getNome() + " (-15% desconto de atacado)");
 
-                        this.registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.COMPRA_BALCAO,
+                        this.registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.COMPRA_B2B,
                                 itemVenda.getNome(), qtdComprada, totalPago,
                                 "Aquisição B2B Atacado de " + especializada.getNome());
                     }
@@ -715,6 +726,274 @@ public class Lojas {
         if (geradorMineracao != null && cidadeSede != null) {
             geradorMineracao.extrairMineriosDoDia(this, cidadeSede.getVeiosMineraisDisponiveis(), dia, hora, random);
         }
+    }
+
+    // =========================================================================
+    // CLIENTELA, REPOSIÇÃO E PRODUÇÃO POR RECEITAS DO CATÁLOGO
+    // =========================================================================
+
+    /** Caixa que a loja preserva: não gasta com reposição, atacado nem encomendas. */
+    public static final long RESERVA_CAIXA_LATAO = 20_000L;
+
+    /** Estoque que a loja tenta manter de um item: o dobro da demanda, mais uma folga. */
+    public int estoqueAlvo(int idItem) {
+        return demandaPorItem.getOrDefault(idItem, 0) * 2 + 2;
+    }
+
+    public long caixaDisponivelParaCompras() {
+        return Math.max(0L, caixa.getValorTotalEmLatao() - RESERVA_CAIXA_LATAO);
+    }
+
+    /** Movimento de clientes conforme o porte do assentamento. */
+    private double fatorClientela() {
+        if (cidadeSede == null || cidadeSede.getTipo() == null) return 1.0;
+        return switch (cidadeSede.getTipo()) {
+            case REINO -> 1.5;
+            case CIDADE -> 1.0;
+            case FORTALEZA -> 0.8;
+            case VILA -> 0.5;
+        };
+    }
+
+    /**
+     * Clientes da cidade compram ao longo do dia. A procura segue a demanda do item e
+     * reage ao preço: cai quando o preço dinâmico passa do valor de referência e sobe
+     * quando está barato. Materiais vendem pouco no balcão (o grosso vai às oficinas).
+     *
+     * @return total recebido em latão
+     */
+    public long atenderClientesNpc(Random random, int dia, int hora) {
+        Random rnd = random != null ? random : new Random();
+        long recebidoTotal = 0L;
+        for (Item item : new ArrayList<>(estoque)) {
+            int disponivel = item.getQuantidade();
+            if (disponivel <= 0) continue;
+            long preco = calcularPrecoDinamicoVendaEmLatao(item);
+            double referencia = Math.max(1.0, item.getPrecoEmLatao()
+                    * (cidadeSede != null ? item.calcularMultiplicadorRegional(cidadeSede) : 1.0));
+            double elasticidade = Math.max(0.3, Math.min(2.0, referencia / preco));
+            double procura = demandaPorItem.getOrDefault(item.getId(), 3) * 0.5 * elasticidade * fatorClientela();
+            if (item.getTipo() == Item.TipoItem.MATERIAL) procura *= 0.3;
+            int vendidos = Math.min(disponivel, (int) Math.round(procura * (0.6 + 0.8 * rnd.nextDouble())));
+            if (vendidos <= 0) continue;
+
+            long recebido = preco * vendidos;
+            removerUnidades(item.getId(), vendidos);
+            caixa.receberLatao(recebido);
+            saidasRecentes.merge(item.getId(), vendidos, Integer::sum);
+            recebidoTotal += recebido;
+            registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.VENDA_BALCAO,
+                    item.getNome(), vendidos, recebido, "Clientes da cidade");
+        }
+        return recebidoTotal;
+    }
+
+    public List<OrdemReceita> getOrdensReceita() { return Collections.unmodifiableList(ordensReceita); }
+
+    /** Usado pela persistência ao recarregar o mundo. */
+    public void adicionarOrdemCarregada(OrdemReceita ordem) {
+        if (ordem != null) ordensReceita.add(ordem);
+    }
+
+    public int getOrdensSimultaneasMax() {
+        return 1 + arvoreEvolucao.getBonusOrdensSimultaneas();
+    }
+
+    /**
+     * Como a loja vai cumprir {@code lotes} da receita: em receitas com etapas, cada componente
+     * livre na prateleira substitui a etapa dele (e os materiais dela); o resto sai dos materiais.
+     */
+    private record PlanoProducao(List<Boolean> etapaDaPrateleira, Map<Integer, Integer> materiais) {}
+
+    private PlanoProducao planejar(ReceitaLoja receita, int lotes, boolean usarPrateleira) {
+        int n = Math.max(1, lotes);
+        Map<Integer, Integer> materiais = new LinkedHashMap<>();
+        List<Boolean> daPrateleira = new ArrayList<>();
+        if (receita.etapas().isEmpty()) {
+            for (ReceitaLoja.Insumo ins : receita.insumos()) materiais.merge(ins.itemId(), ins.quantidade() * n, Integer::sum);
+            return new PlanoProducao(daPrateleira, materiais);
+        }
+        Map<Integer, Integer> livres = new HashMap<>();
+        for (ReceitaLoja.Etapa e : receita.etapas()) {
+            int livre = livres.computeIfAbsent(e.componenteItemId(), this::getQuantidadeEstoque);
+            if (usarPrateleira && livre >= n) {
+                livres.put(e.componenteItemId(), livre - n);
+                daPrateleira.add(true);
+            } else {
+                daPrateleira.add(false);
+                for (ReceitaLoja.Insumo ins : e.insumos()) materiais.merge(ins.itemId(), ins.quantidade() * n, Integer::sum);
+            }
+        }
+        return new PlanoProducao(daPrateleira, materiais);
+    }
+
+    /** Insumos que faltam no estoque para {@code lotes} da receita (itemId -> unidades faltantes). */
+    public Map<Integer, Integer> insumosFaltantes(ReceitaLoja receita, int lotes) {
+        Map<Integer, Integer> faltam = new LinkedHashMap<>();
+        planejar(receita, lotes, true).materiais().forEach((id, precisa) -> {
+            int tem = getQuantidadeEstoque(id);
+            if (tem < precisa) faltam.put(id, precisa - tem);
+        });
+        return faltam;
+    }
+
+    /**
+     * Abre uma ordem de produção: consome os insumos e paga a mão de obra na hora.
+     * Com {@code insumosPorConta} (o Mestre fornece tudo) nada sai do estoque nem do caixa.
+     *
+     * Em receitas com etapas, componentes livres na prateleira são reservados na hora e poupam
+     * o tempo da etapa deles; as demais etapas ficam prontas uma depois da outra, e a montagem
+     * vem no fim.
+     *
+     * @return a ordem aberta, ou null se faltar insumo ou caixa
+     */
+    public OrdemReceita iniciarReceita(ReceitaLoja receita, Item resultado, int lotes, int dia, int hora,
+                                       OrdemReceita.Origem origem, boolean insumosPorConta) {
+        if (receita == null || resultado == null || lotes < 1) return null;
+        PlanoProducao plano = planejar(receita, lotes, !insumosPorConta);
+        if (!insumosPorConta) {
+            if (!insumosFaltantes(receita, lotes).isEmpty()) return null;
+            long maoDeObra = receita.custoMaoDeObraEmLatao(resultado, lotes);
+            if (!caixa.pagarLatao(maoDeObra)) return null;
+            plano.materiais().forEach((id, qtd) -> removerUnidades(id, qtd));
+            registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CRAFTING,
+                    resultado.getNome(), receita.quantidadeResultado() * lotes, maoDeObra,
+                    "Mão de obra: " + receita.nome() + (origem == OrdemReceita.Origem.MESTRE ? " (ordem do Mestre)" : ""));
+        }
+
+        if (receita.etapas().isEmpty()) {
+            OrdemReceita ordem = new OrdemReceita(0, receita.id(), lotes, dia, dia + receita.diasProducao(), origem, insumosPorConta, List.of());
+            ordensReceita.add(ordem);
+            return ordem;
+        }
+
+        List<OrdemReceita.EtapaOrdem> etapas = new ArrayList<>();
+        double horas = 0;
+        for (int i = 0; i < receita.etapas().size(); i++) {
+            ReceitaLoja.Etapa e = receita.etapas().get(i);
+            if (plano.etapaDaPrateleira().get(i)) {
+                removerUnidades(e.componenteItemId(), lotes);
+                etapas.add(new OrdemReceita.EtapaOrdem(e.componenteItemId(), dia, OrdemReceita.EstadoEtapa.DA_PRATELEIRA));
+                continue;
+            }
+            horas += e.tempoHoras();
+            etapas.add(new OrdemReceita.EtapaOrdem(e.componenteItemId(), dia + Math.max(1, (int) Math.ceil(horas / 24.0)), OrdemReceita.EstadoEtapa.PENDENTE));
+        }
+        int diaFinal = dia + Math.max(1, (int) Math.ceil((horas + receita.horasMontagem()) / 24.0));
+        OrdemReceita ordem = new OrdemReceita(0, receita.id(), lotes, dia, diaFinal, origem, insumosPorConta, etapas);
+        ordensReceita.add(ordem);
+        return ordem;
+    }
+
+    /** Conclui as etapas e ordens cujo prazo chegou: peças prontas ficam reservadas, o resultado entra no estoque. */
+    public int concluirOrdensProntas(int dia, int hora, Map<Integer, ReceitaLoja> receitas, Map<Integer, Item> catalogo) {
+        int concluidas = 0;
+        Iterator<OrdemReceita> it = ordensReceita.iterator();
+        while (it.hasNext()) {
+            OrdemReceita ordem = it.next();
+            for (OrdemReceita.EtapaOrdem e : ordem.getEtapas()) {
+                if (e.getEstado() != OrdemReceita.EstadoEtapa.PENDENTE || (e.getDiaConclusao() > dia && !ordem.prontaNoDia(dia))) continue;
+                e.setEstado(OrdemReceita.EstadoEtapa.RESERVADA);
+                Item peca = catalogo.get(e.getComponenteItemId());
+                registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CONCLUIDA,
+                        peca != null ? peca.getNome() : "Peça #" + e.getComponenteItemId(), ordem.getLotes(), 0L, "Peça pronta, reservada para a encomenda");
+            }
+            if (!ordem.prontaNoDia(dia)) continue;
+            it.remove();
+            ReceitaLoja receita = receitas.get(ordem.getReceitaId());
+            Item modelo = receita != null ? catalogo.get(receita.itemResultadoId()) : null;
+            if (modelo == null) {
+                registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PERDA_DETERIORACAO,
+                        "Receita #" + ordem.getReceitaId(), ordem.getLotes(), 0L, "Lote perdido: a receita ou o item foi apagado");
+                continue;
+            }
+            int qtd = receita.quantidadeResultado() * ordem.getLotes();
+            adicionarItem(clonarItem(modelo, qtd));
+            entradasRecentes.merge(modelo.getId(), qtd, Integer::sum);
+            registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CONCLUIDA,
+                    modelo.getNome(), qtd, 0L, "Lote pronto: " + receita.nome());
+            concluidas++;
+        }
+        return concluidas;
+    }
+
+    /** O Mestre apressa a oficina: a ordem termina agora, sem esperar os dias de produção. */
+    public boolean concluirImediatamente(OrdemReceita ordem, int dia, int hora, Map<Integer, ReceitaLoja> receitas, Map<Integer, Item> catalogo) {
+        if (ordem == null || !ordensReceita.remove(ordem)) return false;
+        OrdemReceita pronta = new OrdemReceita(ordem.getId(), ordem.getReceitaId(), ordem.getLotes(), ordem.getDiaInicio(), dia,
+                ordem.getOrigem(), ordem.isInsumosPorConta(), ordem.getEtapas());
+        ordensReceita.add(pronta);
+        return concluirOrdensProntas(dia, hora, receitas, catalogo) > 0;
+    }
+
+    /**
+     * Cancela uma ordem: as peças já reservadas viram estoque comum e os materiais das etapas
+     * que ainda não viraram peça voltam à prateleira. A mão de obra paga não volta.
+     * Se o Mestre forneceu os insumos, só as peças prontas ficam com a loja.
+     */
+    public boolean cancelarOrdem(OrdemReceita ordem, int dia, int hora, Map<Integer, ReceitaLoja> receitas, Map<Integer, Item> catalogo) {
+        if (ordem == null || !ordensReceita.remove(ordem)) return false;
+        ReceitaLoja receita = receitas.get(ordem.getReceitaId());
+        Map<Integer, Integer> devolvidos = new LinkedHashMap<>();
+        if (ordem.getEtapas().isEmpty()) {
+            if (receita != null && !ordem.isInsumosPorConta()) {
+                for (ReceitaLoja.Insumo ins : receita.insumos()) devolvidos.merge(ins.itemId(), ins.quantidade() * ordem.getLotes(), Integer::sum);
+            }
+        } else {
+            for (OrdemReceita.EtapaOrdem e : ordem.getEtapas()) {
+                if (e.isReservada()) {
+                    devolvidos.merge(e.getComponenteItemId(), ordem.getLotes(), Integer::sum);
+                } else if (receita != null && !ordem.isInsumosPorConta()) {
+                    receita.etapas().stream().filter(et -> et.componenteItemId() == e.getComponenteItemId()).findFirst()
+                            .ifPresent(et -> et.insumos().forEach(ins -> devolvidos.merge(ins.itemId(), ins.quantidade() * ordem.getLotes(), Integer::sum)));
+                }
+            }
+        }
+        devolvidos.forEach((id, qtd) -> {
+            Item modelo = catalogo.get(id);
+            if (modelo != null) adicionarItem(clonarItem(modelo, qtd));
+        });
+        registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.ENCOMENDA_CANCELADA,
+                receita != null ? receita.nome() : "Receita #" + ordem.getReceitaId(), ordem.getLotes(), 0L,
+                devolvidos.isEmpty() ? "Ordem cancelada" : "Ordem cancelada: peças prontas e materiais voltaram à prateleira");
+        return true;
+    }
+
+    /** Peças prontas na oficina reservadas para encomendas (itemId -> unidades). Não podem ser vendidas. */
+    public Map<Integer, Integer> getReservados() {
+        Map<Integer, Integer> r = new LinkedHashMap<>();
+        for (OrdemReceita o : ordensReceita) {
+            for (OrdemReceita.EtapaOrdem e : o.getEtapas()) {
+                if (e.isReservada()) r.merge(e.getComponenteItemId(), o.getLotes(), Integer::sum);
+            }
+        }
+        return r;
+    }
+
+    /** Registros ainda não gravados no livro-caixa do banco. */
+    public List<RegistroMovimentacao> getHistoricoNaoPersistido() {
+        return Collections.unmodifiableList(historico.subList(Math.min(historicoPersistido, historico.size()), historico.size()));
+    }
+
+    public void marcarHistoricoPersistido() {
+        historicoPersistido = historico.size();
+    }
+
+    /** Ajuste manual do Mestre: abastecer ou retirar estoque sem movimentar o caixa. */
+    public void ajustarEstoque(Item modelo, int delta, int dia, int hora) {
+        if (modelo == null || delta == 0) return;
+        if (delta > 0) adicionarItem(clonarItem(modelo, delta));
+        else if (!removerUnidades(modelo.getId(), Math.min(-delta, getQuantidadeEstoque(modelo.getId())))) return;
+        registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.AJUSTE_MESTRE,
+                modelo.getNome(), Math.abs(delta), 0L, delta > 0 ? "Estoque abastecido pelo Mestre" : "Estoque retirado pelo Mestre");
+    }
+
+    /** Ajuste manual do Mestre: define o caixa da loja. */
+    public void definirCaixa(long novoCaixaLatao, int dia, int hora) {
+        long anterior = caixa.getValorTotalEmLatao();
+        caixa = Carteira.deLatao(Math.max(0L, novoCaixaLatao));
+        registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.AJUSTE_MESTRE, "Caixa", 1,
+                Math.abs(novoCaixaLatao - anterior), "Caixa ajustado pelo Mestre de " + Carteira.formatarLatao(anterior));
     }
 
     @Override

@@ -128,6 +128,11 @@ public class LotePrateleira {
         return item;
     }
 
+    /** Reduz o lote ao que ainda existe no estoque da loja. */
+    public void limitarQuantidade(int maximo) {
+        quantidade = Math.max(0, Math.min(quantidade, maximo));
+    }
+
     public int getQuantidade() {
         return quantidade;
     }

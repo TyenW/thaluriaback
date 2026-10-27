@@ -23,6 +23,8 @@ public class Item {
         CONSUMIVEL("Consumível"),
         ACESSORIO("Acessório"),
         MATERIAL("Material de Forja"),
+        COMPONENTE_ARMA("Componente de Arma"), // Peça feita por subcraft (lâmina, cabo...), gerada pela forja
+        COMPONENTE_ARMA_ANCESTRAL("Componente de Arma Ancestral"), // Reservado: lendárias criadas só pelo Mestre (sem regras ainda)
         MAGICO("Item Mágico / Grimório"),
         OUTRO("Geral");
 

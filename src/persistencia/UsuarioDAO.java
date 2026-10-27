@@ -3,6 +3,7 @@ package persistencia;
 import personagem.Atributo;
 import personagem.Raca;
 import personagem.SessaoCriacaoFicha;
+import personagem.SorteadorRacaCriacao;
 
 import java.sql.*;
 import java.util.*;
@@ -66,7 +67,7 @@ public class UsuarioDAO {
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM usuarios")) {
             if (rs.next() && rs.getInt(1) == 0) {
-                cadastrarUsuario("mestre", "thaluriaadmin", "MESTRE", 999);
+                cadastrarUsuario("mestre", "Senha14933", "MESTRE", 999);
                 cadastrarUsuario("jogador1", "123456", "JOGADOR", 2);
             }
         } catch (SQLException e) {
@@ -169,6 +170,28 @@ public class UsuarioDAO {
         }
     }
 
+    public ContaUsuario buscarPorId(int id) {
+        String sql = "SELECT id, username, papel, limite_maximo_fichas, fator_sorte_pity FROM usuarios WHERE id = ?";
+        try (Connection conn = BancoDados.obterConexao();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return new ContaUsuario(
+                        rs.getInt("id"),
+                        rs.getString("username"),
+                        rs.getString("papel"),
+                        rs.getInt("limite_maximo_fichas"),
+                        rs.getInt("fator_sorte_pity")
+                    );
+                }
+            }
+            return null;
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao buscar utilizador por id: " + e.getMessage(), e);
+        }
+    }
+
     public void atualizarLimiteFichas(int usuarioId, int novoLimite) {
         String sql = "UPDATE usuarios SET limite_maximo_fichas = ? WHERE id = ?";
         try (Connection conn = BancoDados.obterConexao();
@@ -193,6 +216,83 @@ public class UsuarioDAO {
         }
     }
 
+    public boolean excluirSessaoCriacao(int usuarioId) {
+        String sql = "DELETE FROM sessoes_criacao_ficha WHERE usuario_id = ?";
+        try (Connection conn = BancoDados.obterConexao();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, usuarioId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao excluir sessão de criação: " + e.getMessage(), e);
+        }
+    }
+
+    public SessaoCriacaoFicha carregarSessaoCriacao(int usuarioId) {
+        String sql = "SELECT * FROM sessoes_criacao_ficha WHERE usuario_id = ?";
+        try (Connection conn = BancoDados.obterConexao();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, usuarioId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+
+                String nome = rs.getString("nome_personagem_rascunho");
+                String etapaStr = rs.getString("etapa_atual");
+                String opcoesStr = rs.getString("opcoes_racas_sorteadas");
+                String racaEscolhidaStr = rs.getString("raca_escolhida");
+                String linhagem = rs.getString("linhagem_draconica");
+                String attrsStr = rs.getString("atributos_rolados_json");
+                boolean impulso = rs.getInt("impulso_draconico_ativo") == 1;
+                int rerolls = rs.getInt("rerolls_concedidos");
+                String dica = rs.getString("dica_mestre");
+                boolean aprovada = rs.getInt("aprovada_pelo_mestre") == 1;
+
+                ContaUsuario conta = buscarPorId(usuarioId);
+                String username = conta != null ? conta.getUsername() : "jogador" + usuarioId;
+                int limiteFichas = conta != null ? conta.getLimiteMaximoFichas() : 2;
+                int pity = conta != null ? conta.getFatorSortePity() : 0;
+
+                SessaoCriacaoFicha sessao = new SessaoCriacaoFicha(username, nome != null ? nome : "Novo Aventureiro", limiteFichas, pity);
+
+                SessaoCriacaoFicha.EtapaCriacao etapa = SessaoCriacaoFicha.EtapaCriacao.ESCOLHA_RACA;
+                try {
+                    if (etapaStr != null) etapa = SessaoCriacaoFicha.EtapaCriacao.valueOf(etapaStr);
+                } catch (Exception ignored) {}
+
+                SorteadorRacaCriacao.OpcoesSorteio opcoes = null;
+                if (opcoesStr != null && !opcoesStr.isBlank()) {
+                    String[] partes = opcoesStr.split(";");
+                    Raca op1 = partes.length > 0 ? Raca.buscarPorNome(partes[0]) : Raca.HUMANO;
+                    Raca op2 = partes.length > 1 ? Raca.buscarPorNome(partes[1]) : null;
+                    Raca op3 = partes.length > 2 ? Raca.buscarPorNome(partes[2]) : null;
+                    if (op1 == null) op1 = Raca.HUMANO;
+                    if (op2 == null) op2 = Raca.ANOES;
+                    if (op3 == null) op3 = Raca.ELFOS_FLORESTA;
+                    opcoes = new SorteadorRacaCriacao.OpcoesSorteio(op1, op2, op3);
+                }
+
+                Raca racaEscolhida = racaEscolhidaStr != null ? Raca.buscarPorNome(racaEscolhidaStr) : null;
+
+                Map<Atributo, Integer> attrs = new EnumMap<>(Atributo.class);
+                if (attrsStr != null && !attrsStr.isBlank()) {
+                    for (String par : attrsStr.split(";")) {
+                        String[] kv = par.split("=");
+                        if (kv.length == 2) {
+                            try {
+                                Atributo a = Atributo.valueOf(kv[0].trim());
+                                attrs.put(a, Integer.parseInt(kv[1].trim()));
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+
+                sessao.restaurarEstado(nome, etapa, opcoes, racaEscolhida, attrs, impulso, rerolls, dica, aprovada);
+                return sessao;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao carregar sessão de criação: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Sincroniza o estado em tempo real de uma SessaoCriacaoFicha para o banco SQLite,
      * permitindo que o painel do Mestre acompanhe instantaneamente cada escolha do jogador.
@@ -210,7 +310,7 @@ public class UsuarioDAO {
                 etapa_atual = excluded.etapa_atual,
                 opcoes_racas_sorteadas = excluded.opcoes_racas_sorteadas,
                 raca_escolhida = excluded.raca_escolhida,
-                linhagem_draconica = excluded.linhagem_draconica,
+                linhagem_draconica = COALESCE(excluded.linhagem_draconica, sessoes_criacao_ficha.linhagem_draconica),
                 atributos_rolados_json = excluded.atributos_rolados_json,
                 impulso_draconico_ativo = excluded.impulso_draconico_ativo,
                 rerolls_concedidos = excluded.rerolls_concedidos,

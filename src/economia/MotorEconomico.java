@@ -22,6 +22,18 @@ public class MotorEconomico {
     private int diaAtual = 1;
     private int horaAtual = 8;
 
+    /** Rotas já calculadas no ciclo atual (RotaComercial é imutável); limpo a cada dia, pois o perigo muda. */
+    private final Map<String, Optional<RotaComercial>> rotasDoDia = new HashMap<>();
+
+    /** Custo entregue (mercadoria + frete + escolta) máximo, como fração do valor de revenda local. */
+    private static final double MARGEM_MAXIMA_CUSTO_ENCOMENDA = 0.80;
+
+    // Receitas cadastradas pelo Mestre e catálogo de itens (carregados do banco)
+    private List<ReceitaLoja> receitas = new ArrayList<>();
+    private Map<Integer, ReceitaLoja> receitasPorId = new HashMap<>();
+    private RedeConhecimento redeConhecimento = RedeConhecimento.vazia();
+    private Map<Integer, Item> catalogoItens = new HashMap<>();
+
     public MotorEconomico() {
         this(new Random());
     }
@@ -62,29 +74,54 @@ public class MotorEconomico {
      * e dispara encomendas intermunicipais automáticas.
      */
     public void executarCicloDiario() {
+        rotasDoDia.clear();
+        limparCaravanasConcluidas();
         for (Cidade cidade : cidades) {
+            // Receitas regionais só saem das cidades que já chegaram à Produção (as comuns valem em todo lugar)
+            List<ReceitaLoja> receitasDaCidade = receitas.stream()
+                    .filter(r -> redeConhecimento.receitaLiberada(r.id(), cidade.getId(), diaAtual)).toList();
             for (Lojas loja : cidade.getLojas()) {
                 loja.decairFluxoRecente();
 
-                for (Item modelo : new ArrayList<>(loja.getCatalogoConhecido().values())) {
-                    // 1. Entrada de fornecedores NPCs locais baseada na geologia e bioma da cidade (Ponte para Crafting)
-                    double chanceNpc = cidade.calcularChanceFornecedorNpc(modelo);
-                    if (random.nextDouble() < chanceNpc) {
-                        int qtdFornecida = cidade.calcularQtdFornecedorNpc(modelo, random);
-                        loja.comprarDeNpc(modelo, qtdFornecida, diaAtual, horaAtual);
-                    }
+                // Conhecimento que chegou ao estágio Comércio: a loja passa a procurar o item
+                for (Integer itemId : redeConhecimento.itensParaPrateleira(loja, diaAtual)) {
+                    Item modelo = catalogoItens.get(itemId);
+                    if (modelo != null && !loja.getCatalogoConhecido().containsKey(itemId)) loja.definirDemanda(modelo, 2);
+                }
 
-                    // 2. Oscilação orgânica da demanda (entre 2 e 10 unidades)
+                // 1. Lotes cuja produção terminou entram no estoque
+                loja.concluirOrdensProntas(diaAtual, horaAtual, receitasPorId, catalogoItens);
+
+                // 2. Clientes da cidade compram no balcão (o dinheiro que sustenta a loja)
+                loja.atenderClientesNpc(random, diaAtual, horaAtual);
+
+                for (Item modelo : new ArrayList<>(loja.getCatalogoConhecido().values())) {
+                    // 3. Oscilação orgânica da demanda (entre 2 e 10 unidades)
                     loja.definirDemanda(modelo, 2 + random.nextInt(9));
 
-                    // 3. Encomenda intermunicipal caso falte estoque para atender à demanda projetada
+                    // 4. Fornecedores NPC locais (bioma e geologia), só até o estoque-alvo e sem tocar na reserva
+                    // (item regional só tem fornecedor local onde já se sabe fazer)
+                    RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(modelo.getId(), cidade.getId(), diaAtual);
+                    boolean temFornecedorLocal = estagio == null || estagio == RedeConhecimento.Estagio.PRODUCAO;
+                    int falta = loja.estoqueAlvo(modelo.getId()) - loja.getQuantidadeEstoque(modelo.getId());
+                    if (temFornecedorLocal && falta > 0 && random.nextDouble() < cidade.calcularChanceFornecedorNpc(modelo)) {
+                        int qtdFornecida = Math.min(falta, cidade.calcularQtdFornecedorNpc(modelo, random));
+                        if (loja.calcularPrecoCompraNpcEmLatao(modelo) * qtdFornecida <= loja.caixaDisponivelParaCompras()) {
+                            loja.comprarDeNpc(modelo, qtdFornecida, diaAtual, horaAtual);
+                        }
+                    }
+
+                    // 5. Encomenda intermunicipal caso falte estoque para atender à demanda projetada
                     int deficit = loja.getDeficitDemanda(modelo.getId());
                     if (deficit > 0 && !temCaravanaAtivaPara(loja, modelo.getId())) {
                         solicitarCompraEntreCidades(loja, modelo, deficit);
                     }
                 }
 
-                // 4. Manufatura autônoma da loja para atender ao livro de receitas de artesanato
+                // 6. IA do mercador: escolhe a receita mais rentável do dia (ou pede os insumos que faltam)
+                IALojistaDeterministica.decidirProducaoDoDia(loja, receitasDaCidade, catalogoItens, diaAtual, horaAtual);
+
+                // 7. Manufatura legada por moldes de material (MoldeReceita)
                 loja.processarCraftingDiario(diaAtual, horaAtual);
 
                 // 5. Ciclo v6: deterioração de perecíveis, prateleira/liquidação, ordens e mineração
@@ -113,6 +150,9 @@ public class MotorEconomico {
     public boolean solicitarCompraEntreCidades(Lojas compradora, Item itemDesejado, int qtd) {
         Cidade destino = compradora.getCidadeSede();
         if (destino == null || itemDesejado == null || qtd <= 0) return false;
+        // Item regional só viaja para cidades que pelo menos ouviram falar dele
+        RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(itemDesejado.getId(), destino.getId(), diaAtual);
+        if (estagio != null && !estagio.peloMenos(RedeConhecimento.Estagio.RUMOR)) return false;
 
         Lojas melhorFornecedora = null;
         RotaComercial melhorRota = null;
@@ -124,7 +164,15 @@ public class MotorEconomico {
         for (Cidade outraCidade : cidades) {
             if (outraCidade.equals(destino)) continue;
 
-            RotaComercial rota = NavegadorGrafo.calcularMelhorRota(outraCidade, destino, 0.25);
+            // Só calcula a rota (Dijkstra) se alguma loja da cidade tiver o item: é a parte cara do ciclo
+            boolean alguemTem = false;
+            for (Lojas l : outraCidade.getLojas()) {
+                if (l.getQuantidadeEstoque(itemDesejado.getId()) >= qtd) { alguemTem = true; break; }
+            }
+            if (!alguemTem) continue;
+
+            RotaComercial rota = rotasDoDia.computeIfAbsent(outraCidade.getId() + ">" + destino.getId(),
+                    k -> Optional.ofNullable(NavegadorGrafo.calcularMelhorRota(outraCidade, destino, 0.25))).orElse(null);
             if (rota == null) continue;
 
             for (Lojas fornecedora : outraCidade.getLojas()) {
@@ -155,7 +203,14 @@ public class MotorEconomico {
 
         // Verifica se a loja compradora tem saldo em latão para mercadoria + frete (+ escolta caso recomendada)
         long custoEscoltaEstimado = melhorRota.recomendaEscolta() ? melhorRota.calcularCustoEscoltaEmLatao() : 0L;
-        if (!compradora.getCaixa().temSaldoEmLatao(menorCustoTotalLatao + custoEscoltaEstimado)) {
+        if (compradora.caixaDisponivelParaCompras() < menorCustoTotalLatao + custoEscoltaEstimado) {
+            return false;
+        }
+
+        // Mercador racional: só encomenda se a mercadoria chega custando bem menos do que vende na própria loja.
+        // Sem isso, frete e escolta consumiam mais do que todo o caixa do mundo em poucas semanas.
+        long valorDeRevendaLocal = compradora.calcularPrecoDinamicoVendaEmLatao(itemDesejado) * qtd;
+        if (menorCustoTotalLatao + custoEscoltaEstimado > Math.round(valorDeRevendaLocal * MARGEM_MAXIMA_CUSTO_ENCOMENDA)) {
             return false;
         }
 
@@ -174,9 +229,13 @@ public class MotorEconomico {
                 "Venda para " + compradora.getNome() + " (" + destino.getNome() + ")");
 
         compradora.registrarMovimentacao(diaAtual, horaAtual,
+                RegistroMovimentacao.TipoOperacao.COMPRA_INTERMUNICIPAL,
+                itemDesejado.getNome(), qtd, custoMercadoriaEscolhidaLatao,
+                "Encomenda de " + melhorFornecedora.getNome() + " (" + melhorFornecedora.getCidadeSede().getNome() + ")");
+        compradora.registrarMovimentacao(diaAtual, horaAtual,
                 RegistroMovimentacao.TipoOperacao.DESPESA_FRETE,
-                itemDesejado.getNome(), qtd, custoMercadoriaEscolhidaLatao + freteLatao,
-                "Encomenda + Frete de " + melhorFornecedora.getNome());
+                itemDesejado.getNome(), qtd, freteLatao,
+                "Frete da encomenda");
 
         Item loteCarga = Lojas.clonarItem(itemDesejado, qtd);
         Caravana caravana = new Caravana(melhorFornecedora, compradora, loteCarga, melhorRota, diaAtual, horaAtual);
@@ -275,6 +334,55 @@ public class MotorEconomico {
         }
     }
 
+    /** Dias que uma caravana entregue ou perdida continua na memória antes de ser descartada. */
+    private static final int DIAS_MEMORIA_CARAVANA = 7;
+
+    /**
+     * Esquece caravanas encerradas há mais de uma semana (e suas missões encerradas).
+     * Sem isso a lista crescia para sempre e era percorrida para cada item, todo dia.
+     */
+    private void limparCaravanasConcluidas() {
+        Set<Caravana> descartadas = new HashSet<>();
+        for (Caravana c : caravanas) {
+            if (!c.isAtiva() && c.getDiaUltimoEvento() < diaAtual - DIAS_MEMORIA_CARAVANA) descartadas.add(c);
+        }
+        if (descartadas.isEmpty()) return;
+        caravanas.removeAll(descartadas);
+        missoes.removeIf(m -> descartadas.contains(m.getCaravanaAlvo())
+                && m.getStatus() != MissaoComercial.StatusMissao.DISPONIVEL_JOGADORES
+                && m.getStatus() != MissaoComercial.StatusMissao.ACEITA_POR_JOGADOR);
+    }
+
+    /**
+     * Devolve ao mundo uma caravana carregada do banco. As missões não são salvas:
+     * quem esperava escolta parte desprotegida, e carga extraviada ganha nova missão de resgate.
+     */
+    public void restaurarCaravana(Caravana c) {
+        if (c == null) return;
+        caravanas.add(c);
+        if (c.getStatus() == Caravana.StatusCaravana.AGUARDANDO_ESCOLTA) {
+            c.iniciarViagem(Caravana.TipoProtecao.DESPROTEGIDA, diaAtual, horaAtual);
+        } else if (c.getStatus() == Caravana.StatusCaravana.EXTRAVIADA) {
+            long recompensa = Math.max(10_000L, Math.round(c.getCarga().getValorTotalEmLatao() * 0.35));
+            missoes.add(new MissaoComercial(MissaoComercial.TipoMissao.RESGATE_CARGA, c.getCidadeMaisProxima(), c, recompensa, 24));
+        }
+    }
+
+    public List<Caravana> getCaravanasAtivas() {
+        List<Caravana> lista = new ArrayList<>();
+        for (Caravana c : caravanas) if (c.isAtiva()) lista.add(c);
+        return lista;
+    }
+
+    /** Missão ainda em aberto ligada à caravana (escolta ou resgate), se houver. */
+    public MissaoComercial missaoAbertaDa(Caravana c) {
+        for (MissaoComercial m : missoes) {
+            if (m.getCaravanaAlvo().equals(c) && (m.getStatus() == MissaoComercial.StatusMissao.DISPONIVEL_JOGADORES
+                    || m.getStatus() == MissaoComercial.StatusMissao.ACEITA_POR_JOGADOR)) return m;
+        }
+        return null;
+    }
+
     public boolean temCaravanaAtivaPara(Lojas destino, int idItem) {
         for (Caravana c : caravanas) {
             if (c.getLojaDestino().equals(destino) && c.getCarga().getId() == idItem
@@ -354,6 +462,35 @@ public class MotorEconomico {
             }
         }
         return Collections.unmodifiableList(lista);
+    }
+
+    /** Recebe do banco as receitas cadastradas e o catálogo de itens. */
+    public void definirReceitasECatalogo(List<ReceitaLoja> receitas, Collection<Item> catalogo) {
+        this.receitas = new ArrayList<>(receitas);
+        this.receitasPorId = new HashMap<>();
+        for (ReceitaLoja r : receitas) receitasPorId.put(r.id(), r);
+        this.catalogoItens = new HashMap<>();
+        for (Item i : catalogo) catalogoItens.put(i.getId(), i);
+    }
+
+    public List<ReceitaLoja> getReceitas() { return Collections.unmodifiableList(receitas); }
+
+    /** Quem sabe fazer o quê (disseminação de tipos de arma e receitas regionais). */
+    public RedeConhecimento getRedeConhecimento() { return redeConhecimento; }
+
+    public void setRedeConhecimento(RedeConhecimento rede) {
+        this.redeConhecimento = rede != null ? rede : RedeConhecimento.vazia();
+    }
+    public Map<Integer, ReceitaLoja> getReceitasPorId() { return Collections.unmodifiableMap(receitasPorId); }
+    public Map<Integer, Item> getCatalogoItens() { return Collections.unmodifiableMap(catalogoItens); }
+
+    public Lojas buscarLojaPorId(int id) {
+        for (Cidade c : cidades) {
+            for (Lojas l : c.getLojas()) {
+                if (l.getId() == id) return l;
+            }
+        }
+        return null;
     }
 
     // Getters de Estado

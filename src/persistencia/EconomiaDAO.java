@@ -13,6 +13,7 @@ import java.util.*;
 public class EconomiaDAO {
 
     private final ItemDAO itemDAO;
+    private final ComercioDAO comercioDAO = new ComercioDAO();
 
     public EconomiaDAO() {
         this.itemDAO = new ItemDAO();
@@ -213,50 +214,9 @@ public class EconomiaDAO {
         try (Connection conn = BancoDados.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (loja.getId() == 0) {
-                    String sql = """
-                        INSERT INTO lojas (nome, mercador, cidade_id, tipo, e_rede, nome_rede, caixa_latao)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """;
-                    try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                        ps.setString(1, loja.getNome());
-                        ps.setString(2, loja.getMercador());
-                        ps.setInt(3, loja.getCidadeSede().getId());
-                        ps.setString(4, loja.getTipoEstabelecimento().name());
-                        ps.setInt(5, loja.isLojaDeRede() ? 1 : 0);
-                        ps.setString(6, loja.getNomeDaRede());
-                        ps.setLong(7, loja.getCaixa() != null ? loja.getCaixa().getValorTotalEmLatao() : 0L);
-                        ps.executeUpdate();
-                        try (ResultSet rs = ps.getGeneratedKeys()) {
-                            if (rs.next()) {
-                                loja.setId(rs.getInt(1));
-                            }
-                        }
-                    }
-                } else {
-                    String sql = """
-                        UPDATE lojas SET
-                            nome = ?, mercador = ?, cidade_id = ?, tipo = ?,
-                            e_rede = ?, nome_rede = ?, caixa_latao = ?
-                        WHERE id = ?
-                    """;
-                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                        ps.setString(1, loja.getNome());
-                        ps.setString(2, loja.getMercador());
-                        ps.setInt(3, loja.getCidadeSede().getId());
-                        ps.setString(4, loja.getTipoEstabelecimento().name());
-                        ps.setInt(5, loja.isLojaDeRede() ? 1 : 0);
-                        ps.setString(6, loja.getNomeDaRede());
-                        ps.setLong(7, loja.getCaixa() != null ? loja.getCaixa().getValorTotalEmLatao() : 0L);
-                        ps.setInt(8, loja.getId());
-                        ps.executeUpdate();
-                    }
-                }
-
-                // Sincronizar Estoque e Demanda
-                salvarEstoqueLoja(conn, loja);
-
+                gravarLoja(conn, loja);
                 conn.commit();
+                loja.marcarHistoricoPersistido();
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;
@@ -264,6 +224,56 @@ public class EconomiaDAO {
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao salvar loja no SQLite: " + loja.getNome(), e);
         }
+    }
+
+    /** Grava loja, estoque, ordens e livro-caixa pendente na transação recebida. */
+    private void gravarLoja(Connection conn, Lojas loja) throws SQLException {
+        if (loja.getId() == 0) {
+            String sql = """
+                INSERT INTO lojas (nome, mercador, cidade_id, tipo, e_rede, nome_rede, caixa_latao, nivel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+            try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                ps.setString(1, loja.getNome());
+                ps.setString(2, loja.getMercador());
+                ps.setInt(3, loja.getCidadeSede().getId());
+                ps.setString(4, loja.getTipoEstabelecimento().name());
+                ps.setInt(5, loja.isLojaDeRede() ? 1 : 0);
+                ps.setString(6, loja.getNomeDaRede());
+                ps.setLong(7, loja.getCaixa() != null ? loja.getCaixa().getValorTotalEmLatao() : 0L);
+                ps.setInt(8, loja.getNivelLoja());
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) {
+                        loja.setId(rs.getInt(1));
+                    }
+                }
+            }
+        } else {
+            String sql = """
+                UPDATE lojas SET
+                    nome = ?, mercador = ?, cidade_id = ?, tipo = ?,
+                    e_rede = ?, nome_rede = ?, caixa_latao = ?, nivel = ?
+                WHERE id = ?
+            """;
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, loja.getNome());
+                ps.setString(2, loja.getMercador());
+                ps.setInt(3, loja.getCidadeSede().getId());
+                ps.setString(4, loja.getTipoEstabelecimento().name());
+                ps.setInt(5, loja.isLojaDeRede() ? 1 : 0);
+                ps.setString(6, loja.getNomeDaRede());
+                ps.setLong(7, loja.getCaixa() != null ? loja.getCaixa().getValorTotalEmLatao() : 0L);
+                ps.setInt(8, loja.getNivelLoja());
+                ps.setInt(9, loja.getId());
+                ps.executeUpdate();
+            }
+        }
+
+        // Sincronizar Estoque e Demanda, ordens de produção e livro-caixa
+        salvarEstoqueLoja(conn, loja);
+        comercioDAO.salvarOrdens(conn, loja);
+        comercioDAO.gravarHistoricoPendente(conn, loja);
     }
 
     private void salvarEstoqueLoja(Connection conn, Lojas loja) throws SQLException {
@@ -321,8 +331,10 @@ public class EconomiaDAO {
                 Lojas loja = new Lojas(nome, mercador, cidade, rede, nomeRede, tipo);
                 loja.setId(id);
                 loja.setCaixa(Carteira.deLatao(caixaLatao));
+                loja.setNivelLoja(rs.getInt("nivel"));
 
                 carregarEstoqueEDemanda(conn, loja);
+                comercioDAO.carregarOrdens(conn, loja);
                 lista.add(loja);
             }
         } catch (SQLException e) {
@@ -814,6 +826,8 @@ public class EconomiaDAO {
     public MotorEconomico carregarMotorEconomicoCompleto() {
         popularCenarioPadraoSeVazio();
         popularCidadesAtlasSeAusentes();
+        SementesComercio.aplicar(this);
+        ForjaDAO.semear();
 
         MotorEconomico motor = new MotorEconomico();
         List<Cidade> cidades = listarCidades();
@@ -826,17 +840,38 @@ public class EconomiaDAO {
 
         listarConexoes(cidadesMap);
         listarLojas(cidadesMap);
+        motor.definirReceitasECatalogo(comercioDAO.listarReceitas(), itemDAO.listarTodos());
+        motor.setRedeConhecimento(new ConhecimentoDAO().carregarRede(motor));
+        comercioDAO.carregarCaravanas(motor);
 
         return motor;
     }
 
+    /**
+     * Grava todas as lojas numa única transação (uma por loja levava ~10 s com 200 lojas).
+     * As cidades não mudam com a simulação; são editadas direto no banco pelo gerenciador.
+     */
     public void salvarEstadoCompleto(MotorEconomico motor) {
         if (motor == null) return;
+        List<Lojas> lojas = new ArrayList<>();
         for (Cidade c : motor.getCidades()) {
-            salvarCidade(c);
             for (Lojas l : c.getLojas()) {
-                salvarLoja(l);
+                if (l.getCidadeSede() != null) lojas.add(l);
             }
         }
+        try (Connection conn = BancoDados.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                for (Lojas l : lojas) gravarLoja(conn, l);
+                comercioDAO.salvarCaravanas(conn, motor);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao salvar o estado do comércio", e);
+        }
+        for (Lojas l : lojas) l.marcarHistoricoPersistido();
     }
 }

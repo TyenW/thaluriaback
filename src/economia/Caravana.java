@@ -85,6 +85,62 @@ public class Caravana {
         this.horaUltimoEvento = hora;
     }
 
+    /**
+     * Recria uma caravana salva no banco, com o mesmo id e a mesma posição na rota.
+     * Os próximos ids continuam depois dos restaurados.
+     */
+    public static Caravana restaurar(int id, Lojas origem, Lojas destino, Item carga, RotaComercial rota,
+                                     StatusCaravana status, TipoProtecao protecao, int indiceAresta, double kmNaAresta,
+                                     int dia, int hora) {
+        Caravana c = new Caravana(origem, destino, carga, rota, dia, hora, id);
+        c.status = status != null ? status : StatusCaravana.EM_TRANSITO;
+        c.protecao = protecao != null ? protecao : TipoProtecao.DESPROTEGIDA;
+        c.indiceArestaAtual = Math.max(0, indiceAresta);
+        c.kmNaArestaAtual = Math.max(0, kmNaAresta);
+        synchronized (Caravana.class) {
+            sequencialId = Math.max(sequencialId, id + 1);
+        }
+        return c;
+    }
+
+    private Caravana(Lojas lojaOrigem, Lojas lojaDestino, Item carga, RotaComercial rota, int dia, int hora, int id) {
+        this.id = id;
+        this.lojaOrigem = Objects.requireNonNull(lojaOrigem, "Loja de origem não pode ser nula");
+        this.lojaDestino = Objects.requireNonNull(lojaDestino, "Loja de destino não pode ser nula");
+        this.carga = Objects.requireNonNull(carga, "Carga não pode ser nula");
+        this.rota = Objects.requireNonNull(rota, "Rota comercial não pode ser nula");
+        this.status = StatusCaravana.AGUARDANDO_ESCOLTA;
+        this.protecao = TipoProtecao.DESPROTEGIDA;
+        this.diaUltimoEvento = dia;
+        this.horaUltimoEvento = hora;
+    }
+
+    /** Ainda na estrada (ou à espera dela): aparece no mapa e é salva no banco. */
+    public boolean isAtiva() {
+        return status == StatusCaravana.AGUARDANDO_ESCOLTA || status == StatusCaravana.EM_TRANSITO
+                || status == StatusCaravana.EXTRAVIADA;
+    }
+
+    /** Horas de viagem até o destino, nas velocidades atuais (terra 6 km/h, mar 14 km/h). */
+    public double horasRestantesEstimadas() {
+        List<Conexao> arestas = rota.getArestas();
+        double horas = 0;
+        for (int i = indiceArestaAtual; i < arestas.size(); i++) {
+            Conexao a = arestas.get(i);
+            double km = a.getDistanciaKm() - (i == indiceArestaAtual ? kmNaArestaAtual : 0);
+            horas += Math.max(0, km) / (a.getTipo() == Conexao.TipoDeRota.MARITIMA ? 14.0 : 6.0);
+        }
+        return horas;
+    }
+
+    /** Quilômetros já percorridos desde a origem. */
+    public double kmPercorridos() {
+        List<Conexao> arestas = rota.getArestas();
+        double km = 0;
+        for (int i = 0; i < Math.min(indiceArestaAtual, arestas.size()); i++) km += arestas.get(i).getDistanciaKm();
+        return km + kmNaArestaAtual;
+    }
+
     public void iniciarViagem(TipoProtecao protecao, int dia, int hora) {
         this.protecao = (protecao != null) ? protecao : TipoProtecao.DESPROTEGIDA;
         this.status = StatusCaravana.EM_TRANSITO;
@@ -150,8 +206,9 @@ public class Caravana {
         this.diaUltimoEvento = dia;
         this.horaUltimoEvento = hora;
         lojaDestino.adicionarItem(carga);
+        // A compra já foi lançada (com valor) ao encomendar; aqui só registra a chegada da carga
         lojaDestino.registrarMovimentacao(dia, hora,
-                RegistroMovimentacao.TipoOperacao.COMPRA_INTERMUNICIPAL,
+                RegistroMovimentacao.TipoOperacao.ENTREGA_CARAVANA,
                 carga.getNome(), carga.getQuantidade(), 0L,
                 "Caravana #" + id + " entregue com sucesso vinda de " + lojaOrigem.getNome());
     }

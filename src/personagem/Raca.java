@@ -457,6 +457,20 @@ public class Raca {
     }
 
     @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Raca raca = (Raca) o;
+        return Objects.equals(nome != null ? nome.toLowerCase(Locale.ROOT) : "",
+                              raca.nome != null ? raca.nome.toLowerCase(Locale.ROOT) : "");
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(nome != null ? nome.toLowerCase(Locale.ROOT) : "");
+    }
+
+    @Override
     public String toString() {
         return String.format("%s (%s | %s | %s)", nome, reinoOrigem, raridade.getDescricao(), dominancia.getDescricao());
     }

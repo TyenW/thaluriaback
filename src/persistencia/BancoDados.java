@@ -382,6 +382,36 @@ public class BancoDados {
         };
 
         String[] tabelasNovas = {
+            // Caravanas em viagem (fotografia regravada a cada dia de mercado)
+            """
+            CREATE TABLE IF NOT EXISTS caravanas_ativas (
+                id INTEGER PRIMARY KEY,
+                loja_origem_id INTEGER NOT NULL,
+                loja_destino_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL,
+                caminho_cidades TEXT NOT NULL,
+                tipos_trechos TEXT NOT NULL,
+                indice_trecho INTEGER NOT NULL DEFAULT 0,
+                km_no_trecho REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                protecao TEXT NOT NULL,
+                dia_evento INTEGER NOT NULL,
+                hora_evento INTEGER NOT NULL
+            );
+            """,
+            // Lotes de receitas em produção nas lojas (IA do mercador ou ordem do Mestre)
+            """
+            CREATE TABLE IF NOT EXISTS loja_ordens_producao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                loja_id INTEGER NOT NULL,
+                receita_id INTEGER NOT NULL,
+                lotes INTEGER NOT NULL DEFAULT 1,
+                dia_inicio INTEGER NOT NULL,
+                dia_conclusao INTEGER NOT NULL,
+                origem TEXT NOT NULL DEFAULT 'IA'
+            );
+            """,
             // Sessões de login (só o SHA-256 do token é guardado)
             """
             CREATE TABLE IF NOT EXISTS sessoes_login (
@@ -454,6 +484,154 @@ public class BancoDados {
                 chave TEXT PRIMARY KEY,
                 aplicada_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            // Onde um item coletável é achado (campos vazios = qualquer lugar)
+            """
+            CREATE TABLE IF NOT EXISTS item_locais_coleta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER NOT NULL,
+                cidade_id INTEGER,
+                regiao TEXT,
+                geologia TEXT,
+                aquifero TEXT,
+                probabilidade REAL NOT NULL DEFAULT 0.5,
+                qtd_min INTEGER NOT NULL DEFAULT 1,
+                qtd_max INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (item_id) REFERENCES itens(id) ON DELETE CASCADE,
+                FOREIGN KEY (cidade_id) REFERENCES cidades(id)
+            );
+            """,
+            // Forja de armas: moldes (famílias), partes e o que cada parte aceita
+            """
+            CREATE TABLE IF NOT EXISTS moldes_arma (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL UNIQUE,
+                tipo_loja TEXT NOT NULL DEFAULT 'FORJA',
+                slots_efeito INTEGER NOT NULL DEFAULT 1,
+                tempo_montagem_horas REAL NOT NULL DEFAULT 8,
+                descricao TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS molde_partes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                molde_id INTEGER NOT NULL,
+                nome TEXT NOT NULL,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                qtd_materiais INTEGER NOT NULL DEFAULT 1,
+                tempo_horas REAL NOT NULL DEFAULT 4,
+                FOREIGN KEY (molde_id) REFERENCES moldes_arma(id) ON DELETE CASCADE
+            );
+            """,
+            // Opção = uma categoria de material OU um item específico, com bônus que só vale nesta parte
+            """
+            CREATE TABLE IF NOT EXISTS molde_parte_opcoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parte_id INTEGER NOT NULL,
+                categoria_material TEXT,
+                item_id INTEGER,
+                bonus_dano INTEGER NOT NULL DEFAULT 0,
+                bonus_durabilidade INTEGER NOT NULL DEFAULT 0,
+                bonus_alcance_m INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (parte_id) REFERENCES molde_partes(id) ON DELETE CASCADE,
+                FOREIGN KEY (item_id) REFERENCES itens(id)
+            );
+            """,
+            // Tipo de arma (Espada Longa, Katana...): o dado base e o molde que ele usa
+            """
+            CREATE TABLE IF NOT EXISTS tipos_arma (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL UNIQUE,
+                molde_id INTEGER NOT NULL,
+                tipo_item TEXT NOT NULL DEFAULT 'ARMA_BRANCA',
+                qtd_dados INTEGER NOT NULL DEFAULT 1,
+                faces_dado INTEGER NOT NULL DEFAULT 6,
+                alcance_m INTEGER NOT NULL DEFAULT 0,
+                descricao TEXT,
+                FOREIGN KEY (molde_id) REFERENCES moldes_arma(id)
+            );
+            """,
+            // Receita pronta de arma: um material escolhido para cada parte
+            """
+            CREATE TABLE IF NOT EXISTS receitas_arma (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                tipo_arma_id INTEGER NOT NULL,
+                somente_encomenda INTEGER NOT NULL DEFAULT 0,
+                receita_id INTEGER,
+                item_id INTEGER,
+                descricao TEXT,
+                FOREIGN KEY (tipo_arma_id) REFERENCES tipos_arma(id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS receita_arma_materiais (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receita_arma_id INTEGER NOT NULL,
+                parte_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (receita_arma_id) REFERENCES receitas_arma(id) ON DELETE CASCADE
+            );
+            """,
+            // Números de combate das armas geradas pela forja
+            """
+            CREATE TABLE IF NOT EXISTS item_arma (
+                item_id INTEGER PRIMARY KEY,
+                tipo_arma_id INTEGER NOT NULL,
+                dano TEXT NOT NULL,
+                bonus_dano INTEGER NOT NULL DEFAULT 0,
+                durabilidade INTEGER NOT NULL DEFAULT 0,
+                alcance_m INTEGER NOT NULL DEFAULT 0,
+                slots_efeito INTEGER NOT NULL DEFAULT 0,
+                composicao TEXT,
+                FOREIGN KEY (item_id) REFERENCES itens(id) ON DELETE CASCADE
+            );
+            """,
+            // Subcrafts de uma receita compilada da forja (uma etapa por parte, na ordem do molde)
+            """
+            CREATE TABLE IF NOT EXISTS receita_etapas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receita_id INTEGER NOT NULL,
+                ordem INTEGER NOT NULL,
+                nome_parte TEXT NOT NULL,
+                componente_item_id INTEGER NOT NULL,
+                componente_receita_id INTEGER NOT NULL,
+                tempo_horas REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (receita_id) REFERENCES receitas(id) ON DELETE CASCADE
+            );
+            """,
+            // Disseminação: um tipo de arma ou receita concedido a uma cidade e espalhado pelo grafo
+            """
+            CREATE TABLE IF NOT EXISTS conhecimentos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                tipo_arma_id INTEGER,
+                receita_id INTEGER,
+                cidade_origem_id INTEGER NOT NULL,
+                dia_concessao INTEGER NOT NULL,
+                sigilo_dias REAL NOT NULL DEFAULT 7,
+                dias_por_100km REAL NOT NULL DEFAULT 2,
+                resistencia_salto REAL NOT NULL DEFAULT 3,
+                dias_rumor_comercio REAL NOT NULL DEFAULT 10,
+                dias_comercio_producao REAL NOT NULL DEFAULT 20,
+                pausado INTEGER NOT NULL DEFAULT 0,
+                pausado_desde INTEGER,
+                dias_pausados INTEGER NOT NULL DEFAULT 0,
+                segredo INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (cidade_origem_id) REFERENCES cidades(id)
+            );
+            """,
+            // Intervenções do Mestre por cidade: adiantar até um estágio ou revogar
+            """
+            CREATE TABLE IF NOT EXISTS conhecimento_cidades (
+                conhecimento_id INTEGER NOT NULL,
+                cidade_id INTEGER NOT NULL,
+                acao TEXT NOT NULL,
+                atraso REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (conhecimento_id, cidade_id),
+                FOREIGN KEY (conhecimento_id) REFERENCES conhecimentos(id) ON DELETE CASCADE
+            );
             """
         };
 
@@ -502,7 +680,23 @@ public class BancoDados {
                 "ALTER TABLE itens ADD COLUMN geologia_nativa TEXT",
                 "ALTER TABLE itens ADD COLUMN aquifero_nativo TEXT",
                 "ALTER TABLE itens ADD COLUMN preco_base_latao INTEGER",
-                "ALTER TABLE itens ADD COLUMN peso REAL"
+                "ALTER TABLE itens ADD COLUMN peso REAL",
+                // Comércio: nível da oficina, especialidade da receita e saldo no livro-caixa
+                "ALTER TABLE lojas ADD COLUMN nivel INTEGER NOT NULL DEFAULT 3",
+                "ALTER TABLE receitas ADD COLUMN tipo_loja TEXT",
+                "ALTER TABLE livro_caixa_movimentacoes ADD COLUMN saldo_apos_latao INTEGER",
+                // Origem dos itens: coletável e drop ligado ao catálogo (antes era só o nome)
+                "ALTER TABLE itens ADD COLUMN coletavel INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE monstro_drops ADD COLUMN item_id INTEGER REFERENCES itens(id)",
+                // Forja: propriedades de material, itens gerados e receitas compiladas
+                "ALTER TABLE itens ADD COLUMN categoria_material TEXT",
+                "ALTER TABLE itens ADD COLUMN bonus_dano REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE itens ADD COLUMN durabilidade REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE itens ADD COLUMN chave_forja TEXT",
+                "ALTER TABLE receitas ADD COLUMN somente_encomenda INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE receitas ADD COLUMN chave_forja TEXT",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN insumos_por_conta INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN etapas TEXT"
             };
             for (String colSql : colunasMigracao) {
                 try {
@@ -517,8 +711,25 @@ public class BancoDados {
                 stmt.execute("UPDATE itens SET preco_latao = COALESCE(preco_base_latao, preco_latao), peso_kg = COALESCE(peso, peso_kg) WHERE preco_latao IS NULL OR preco_latao = 0");
                 stmt.execute("UPDATE itens SET preco_base_latao = COALESCE(preco_latao, preco_base_latao), peso = COALESCE(peso_kg, peso) WHERE preco_base_latao IS NULL OR preco_base_latao = 0");
             } catch (SQLException ignored) {}
+            stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_chave_forja ON itens(chave_forja) WHERE chave_forja IS NOT NULL");
+            stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_receitas_chave_forja ON receitas(chave_forja) WHERE chave_forja IS NOT NULL");
+            vincularDropsPorNome(conn);
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao inicializar esquema do banco SQLite!", e);
+        }
+    }
+
+    /**
+     * Liga ao catálogo os drops que ainda só têm o nome do item (cadastros antigos e sementes).
+     * Drops cujo nome não bate com nenhum item continuam sem item_id e aparecem como órfãos.
+     */
+    public static void vincularDropsPorNome(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement()) {
+            st.executeUpdate("""
+                UPDATE monstro_drops SET item_id = (
+                    SELECT i.id FROM itens i WHERE TRIM(i.nome) = TRIM(monstro_drops.item_nome) COLLATE NOCASE LIMIT 1
+                ) WHERE item_id IS NULL
+                """);
         }
     }
 }

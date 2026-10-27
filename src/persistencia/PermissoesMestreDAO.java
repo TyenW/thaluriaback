@@ -36,6 +36,18 @@ public class PermissoesMestreDAO {
         }
     }
 
+    public void removerValor(String categoria, String chave) {
+        if (categoria == null || chave == null) return;
+        try (Connection conn = BancoDados.getConnection();
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM controle_mestre WHERE categoria = ? AND chave = ?")) {
+            ps.setString(1, categoria);
+            ps.setString(2, chave);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao remover permissão do mestre no SQLite: " + categoria + "/" + chave, e);
+        }
+    }
+
     public String obterValor(String categoria, String chave, String valorPadrao) {
         String sql = "SELECT valor FROM controle_mestre WHERE categoria = ? AND chave = ?";
         try (Connection conn = BancoDados.getConnection();

@@ -273,8 +273,8 @@ public class MonstroDAO {
             String sqlDrop = """
                 INSERT INTO monstro_drops (
                     monstro_catalogo_id, item_nome, probabilidade, qtd_min, qtd_max,
-                    raridade, qualidade_material, drop_exclusivo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    raridade, qualidade_material, drop_exclusivo, item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM itens WHERE TRIM(nome) = TRIM(?) COLLATE NOCASE LIMIT 1));
             """;
             try (PreparedStatement psD = conn.prepareStatement(sqlDrop)) {
                 for (DropMonstroDTO d : m.drops) {
@@ -286,6 +286,7 @@ public class MonstroDAO {
                     psD.setString(6, d.raridade.name());
                     psD.setInt(7, d.qualidadeMaterial);
                     psD.setInt(8, d.dropExclusivo ? 1 : 0);
+                    psD.setString(9, d.itemNome);
                     psD.addBatch();
                 }
                 psD.executeBatch();

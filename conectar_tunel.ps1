@@ -31,22 +31,54 @@ for ($i = 0; $i -lt 15; $i++) {
     }
 }
 
-# 5. Exibir banner de conexão para o Mestre
+# 5. Sincronizacao automatica e exibicao do banner
 if ($url) {
     Set-Clipboard -Value $url -ErrorAction SilentlyContinue
+
+    # 5.1 Atualiza o arquivo local .env do frontend
+    $envFront = "..\thaluriafront\.env"
+    if (Test-Path "..\thaluriafront") {
+        "VITE_API_URL=$url" | Out-File -FilePath $envFront -Encoding utf8 -Force
+    }
+
+    # 5.2 Se o projeto estiver autenticado e linkado na Vercel, atualiza e dispara redeploy automatico
+    $vercelVinculado = Test-Path "..\thaluriafront\.vercel\project.json"
+    $vercelStatus = "Nao vinculado (Execute publicar_na_vercel.bat uma unica vez)"
+
+    if ($vercelVinculado) {
+        Write-Host "  -> Vercel vinculada detectada! Atualizando VITE_API_URL na nuvem..." -ForegroundColor Yellow
+        try {
+            Push-Location "..\thaluriafront"
+            & npx --yes vercel env add VITE_API_URL --environment production --value "$url" --force --yes 2>$null
+            Write-Host "  -> Disparando Redeploy automatico na Vercel em segundo plano..." -ForegroundColor Yellow
+            Start-Process -FilePath "cmd.exe" -ArgumentList "/c npx vercel redeploy --no-wait" -WorkingDirectory "..\thaluriafront" -WindowStyle Hidden
+            $vercelStatus = "Sincronizado automaticamente na Vercel!"
+            Pop-Location
+        } catch {
+            if ($pwd.Path -like "*thaluriafront*") { Pop-Location }
+        }
+    }
+
     Write-Host ""
     Write-Host "================================================================================" -ForegroundColor Green
-    Write-Host "  URL PUBLICA PARA A VERCEL ATIVA COM SUCESSO!" -ForegroundColor Green
-    Write-Host "  Link HTTPS: $url" -ForegroundColor White -BackgroundColor DarkGreen
+    Write-Host "  MOTOR ONLINE COM TUNEL HTTPS ATIVO!" -ForegroundColor Green
+    Write-Host "  URL da API: $url" -ForegroundColor White -BackgroundColor DarkGreen
+    Write-Host "  Status Vercel: $vercelStatus" -ForegroundColor Cyan
+    Write-Host "================================================================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  (O link acima ja foi copiado para a sua Area de Transferencia - Ctrl+V)" -ForegroundColor Yellow
-    Write-Host "================================================================================" -ForegroundColor Green
-    Write-Host "  INSTRUCOES PARA A VERCEL:" -ForegroundColor Cyan
-    Write-Host "  1. Abra seu projeto na Vercel: https://vercel.com" -ForegroundColor Gray
-    Write-Host "  2. Va em: Settings -> Environment Variables" -ForegroundColor Gray
-    Write-Host "  3. Crie ou atualize: VITE_API_URL = $url" -ForegroundColor Gray
-    Write-Host "  4. Faca Redeploy na Vercel (aba Deployments -> Redeploy)" -ForegroundColor Gray
-    Write-Host "================================================================================" -ForegroundColor Green
+    Write-Host "  OPCAO 1: LINK INSTANTANEO (ZERO ESPERA - RECOMENDADO)" -ForegroundColor Yellow
+    Write-Host "  Os jogadores conectam na hora sem esperar a Vercel compilar:" -ForegroundColor Gray
+    Write-Host "  https://SEU-APP.vercel.app/?servidor=$url" -ForegroundColor White
+    Write-Host ""
+    if (-not $vercelVinculado) {
+        Write-Host "  OPCAO 2: ATUALIZACAO 100% AUTOMATICA NA VERCEL" -ForegroundColor Cyan
+        Write-Host "  Para que o script atualize a Vercel sozinho toda vez que abrir o servidor:" -ForegroundColor Gray
+        Write-Host "  1. Feche o servidor e va na pasta 'thaluriafront'" -ForegroundColor Gray
+        Write-Host "  2. Execute: publicar_na_vercel.bat (faca o login na Vercel 1 unica vez)" -ForegroundColor Gray
+        Write-Host "  Apos isso, toda vez que abrir o servidor, a Vercel sera atualizada sozinha!" -ForegroundColor Gray
+        Write-Host "================================================================================" -ForegroundColor Green
+    }
+    Write-Host "  (A URL $url ja foi copiada para sua Area de Transferencia - Ctrl+V)" -ForegroundColor DarkYellow
     Write-Host ""
 } else {
     Write-Host "  [AVISO] Tunel iniciado. Se o link nao aparecer, confira o arquivo tunnel.log." -ForegroundColor Yellow

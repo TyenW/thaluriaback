@@ -66,6 +66,13 @@ public class ControlePermissoesMestre {
         }
     }
 
+    /** Volta a esconder a criatura dos jogadores (aparece de novo como "???"). */
+    public void ocultarMonstroBestiario(String idOuNomeMonstro) {
+        if (idOuNomeMonstro != null) {
+            monstrosReveladosBestiario.remove(idOuNomeMonstro.trim().toUpperCase(Locale.ROOT));
+        }
+    }
+
     /**
      * Retorna o nome exibido para o jogador (ex: "???" se oculto, ou o nome real se estudado/liberado).
      */

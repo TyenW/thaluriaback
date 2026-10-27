@@ -24,12 +24,29 @@ public class RegistroMovimentacao {
         LIQUIDACAO_PRATELEIRA("Liquidação de Prateleira"),
         RECICLAGEM_SUCATA("Reciclagem de Sucata"),
         VENDA_B2B("Venda B2B Atacado"),
-        CONTRATO_ENCOMENDA("Contrato de Encomenda Especial");
+        CONTRATO_ENCOMENDA("Contrato de Encomenda Especial"),
+        COMPRA_B2B("Compra B2B Atacado"),
+        PRODUCAO_CONCLUIDA("Produção Concluída"),
+        VENDA_MESTRE("Venda do Mestre a Aventureiro"),
+        AJUSTE_MESTRE("Ajuste do Mestre"),
+        ENTREGA_CARAVANA("Caravana Entregue"),
+        ENCOMENDA_CANCELADA("Encomenda Cancelada");
 
         private final String descricao;
 
         TipoOperacao(String descricao) {
             this.descricao = descricao;
+        }
+
+        /** +1 o caixa recebe, -1 o caixa paga, 0 não mexe no caixa (ou é ajuste manual). */
+        public int getFluxo() {
+            return switch (this) {
+                case VENDA_BALCAO, VENDA_INTERMUNICIPAL, LIQUIDACAO_PRATELEIRA, RECICLAGEM_SUCATA,
+                     VENDA_B2B, CONTRATO_ENCOMENDA, VENDA_MESTRE -> 1;
+                case ENTRADA_NPC, COMPRA_BALCAO, COMPRA_INTERMUNICIPAL, DESPESA_FRETE, DESPESA_ESCOLTA,
+                     PRODUCAO_CRAFTING, MANUTENCAO_BASE, SALARIO_MINERADORES, COMPRA_B2B -> -1;
+                default -> 0;
+            };
         }
 
         public String getDescricao() {

@@ -37,6 +37,9 @@ public class ServidorThaluriaAPI {
     private final EconomiaDAO economiaDAO = new EconomiaDAO();
     private final FichaExtrasDAO fichaExtrasDAO = new FichaExtrasDAO();
     private final AdminCrud adminCrud = new AdminCrud();
+    private final RotasComercio rotasComercio = new RotasComercio(this);
+    private final RotasForja rotasForja = new RotasForja(this, rotasComercio);
+    private final RotasConhecimento rotasConhecimento = new RotasConhecimento(this);
     private final SessaoLoginDAO sessaoDAO = new SessaoLoginDAO();
 
     /** Rotas abertas a quem ainda não entrou. */
@@ -54,12 +57,23 @@ public class ServidorThaluriaAPI {
     private volatile MotorEconomico motorEconomico;
     private final Map<Integer, SessaoCriacaoFicha> sessoesEmMemoria = new ConcurrentHashMap<>();
 
+    private SessaoCriacaoFicha obterOuCarregarSessao(int usuarioId) {
+        SessaoCriacaoFicha s = sessoesEmMemoria.get(usuarioId);
+        if (s == null) {
+            s = usuarioDAO.carregarSessaoCriacao(usuarioId);
+            if (s != null && s.getEtapaAtual() != SessaoCriacaoFicha.EtapaCriacao.FINALIZADO) {
+                sessoesEmMemoria.put(usuarioId, s);
+            }
+        }
+        return s;
+    }
+
     @FunctionalInterface
     public interface RotaHandler {
         void handle(HttpExchange exchange) throws Exception;
     }
 
-    private void criarRota(String path, RotaHandler handler) {
+    void criarRota(String path, RotaHandler handler) {
         server.createContext(path, exchange -> {
             if (tratarCors(exchange)) return;
             totalOperacoes.incrementAndGet();
@@ -91,7 +105,12 @@ public class ServidorThaluriaAPI {
 
         this.server = HttpServer.create(new InetSocketAddress(porta), 0);
         this.server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        // O relógio do mercado segue o dia da campanha (o motor recomeçava no dia 1 a cada reinício)
+        this.motorEconomico.setDiaAtual(Math.max(1, controleMestre.getDiaAtualCampanha()));
         configurarRotas();
+        rotasComercio.registrar();
+        rotasForja.registrar();
+        rotasConhecimento.registrar();
     }
 
     /**
@@ -223,8 +242,7 @@ public class ServidorThaluriaAPI {
         });
 
         // 2. Iniciar Criação de Ficha (Sorteia Humano + 2 Raças com Draconato < 1%).
-        // Se o jogador já tem uma criação em andamento, ela é retomada: recarregar a
-        // página não pode gerar um novo sorteio nem novas rerolagens.
+        // Se o jogador já tem uma criação em andamento, ela é retomada com persistência no SQLite.
         criarRota("/api/criacao/iniciar", exchange -> {
             if (tratarCors(exchange)) return;
             Map<String, String> params = lerQueryOuForm(exchange);
@@ -232,13 +250,18 @@ public class ServidorThaluriaAPI {
             String username = params.getOrDefault("username", "jogador1");
             String nomePersonagem = params.getOrDefault("nomePersonagem", "Novo Aventureiro");
 
-            SessaoCriacaoFicha existente = sessoesEmMemoria.get(usuarioId);
+            SessaoCriacaoFicha existente = obterOuCarregarSessao(usuarioId);
             if (existente != null && existente.getEtapaAtual() != SessaoCriacaoFicha.EtapaCriacao.FINALIZADO) {
+                if (nomePersonagem != null && !nomePersonagem.isBlank()) {
+                    existente.setNomePersonagem(nomePersonagem);
+                    usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, existente, null);
+                }
                 enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, existente, true));
                 return;
             }
 
             UsuarioDAO.ContaUsuario conta = usuarioDAO.buscarPorUsername(username);
+            if (conta == null) conta = usuarioDAO.buscarPorId(usuarioId);
             int pityAtual = (conta != null) ? conta.getFatorSortePity() : 0;
 
             SessaoCriacaoFicha sessao = new SessaoCriacaoFicha(
@@ -257,12 +280,38 @@ public class ServidorThaluriaAPI {
             if (tratarCors(exchange)) return;
             Map<String, String> params = lerQueryOuForm(exchange);
             int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "0"));
-            SessaoCriacaoFicha sessao = sessoesEmMemoria.get(usuarioId);
+            SessaoCriacaoFicha sessao = obterOuCarregarSessao(usuarioId);
             if (sessao == null || sessao.getEtapaAtual() == SessaoCriacaoFicha.EtapaCriacao.FINALIZADO) {
                 enviarJson(exchange, 200, "{\"ativa\":false}");
                 return;
             }
             enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, sessao, true));
+        });
+
+        // 2.2 Descartar rascunho de criação e reiniciar do zero
+        criarRota("/api/criacao/reiniciar", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> params = lerQueryOuForm(exchange);
+            int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "0"));
+            sessoesEmMemoria.remove(usuarioId);
+            usuarioDAO.excluirSessaoCriacao(usuarioId);
+            enviarJson(exchange, 200, "{\"status\":\"OK\",\"acao\":\"REINICIADA\"}");
+        });
+
+        // 2.3 Atualizar nome do personagem no rascunho em tempo real
+        criarRota("/api/criacao/atualizar-nome", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> params = lerQueryOuForm(exchange);
+            int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "0"));
+            String novoNome = params.getOrDefault("nomePersonagem", "").trim();
+            SessaoCriacaoFicha sessao = obterOuCarregarSessao(usuarioId);
+            if (sessao != null && !novoNome.isBlank()) {
+                sessao.setNomePersonagem(novoNome);
+                usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, sessao, null);
+                enviarJson(exchange, 200, sessaoCriacaoJson(usuarioId, sessao, false));
+            } else {
+                enviarJson(exchange, 200, "{\"status\":\"IGNORADO\"}");
+            }
         });
 
         // 3. Jogador Escolhe Raça e Rola Atributos dentro de [min, max] (máx. 2 rerolagens)
@@ -273,7 +322,7 @@ public class ServidorThaluriaAPI {
             int indiceOpcao = Integer.parseInt(params.getOrDefault("indiceOpcao", "0"));
             String linhagem = params.getOrDefault("linhagemDraconica", null);
 
-            SessaoCriacaoFicha sessao = sessoesEmMemoria.get(usuarioId);
+            SessaoCriacaoFicha sessao = obterOuCarregarSessao(usuarioId);
             if (sessao == null) {
                 enviarJson(exchange, 400, "{\"erro\":\"Sessão de criação não iniciada\"}");
                 return;
@@ -296,24 +345,23 @@ public class ServidorThaluriaAPI {
         criarRota("/api/mestre/sessoes-ao-vivo", exchange -> {
             if (tratarCors(exchange)) return;
             List<UsuarioDAO.EstadoSessaoCriacaoDTO> sessoes = usuarioDAO.listarTodasSessoesAtivasParaMestre();
-            StringBuilder sb = new StringBuilder("[");
-            for (int i = 0; i < sessoes.size(); i++) {
-                if (i > 0) sb.append(",");
-                UsuarioDAO.EstadoSessaoCriacaoDTO s = sessoes.get(i);
-                sb.append(String.format(Locale.US,
-                    "{\"usuarioId\":%d,\"personagem\":\"%s\",\"etapa\":\"%s\",\"opcoes\":\"%s\",\"racaEscolhida\":\"%s\",\"dicaMestre\":\"%s\",\"aprovada\":%b}",
-                    s.usuarioId, escapar(s.nomePersonagemRascunho), s.etapaAtual,
-                    String.join(",", s.opcoesRacasSorteadas),
-                    s.racaEscolhida != null ? s.racaEscolhida : "",
-                    s.dicaMestre != null ? escapar(s.dicaMestre) : "",
-                    s.aprovadaPeloMestre
-                ));
+            List<Map<String, Object>> lista = new ArrayList<>();
+            for (UsuarioDAO.EstadoSessaoCriacaoDTO s : sessoes) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("usuarioId", s.usuarioId);
+                m.put("personagem", s.nomePersonagemRascunho != null ? s.nomePersonagemRascunho : "Novo Aventureiro");
+                m.put("etapa", s.etapaAtual != null ? s.etapaAtual : "");
+                m.put("opcoes", String.join(",", s.opcoesRacasSorteadas));
+                m.put("racaEscolhida", s.racaEscolhida != null ? s.racaEscolhida : "");
+                m.put("dicaMestre", s.dicaMestre != null ? s.dicaMestre : "");
+                m.put("aprovada", s.aprovadaPeloMestre);
+                m.put("rerollsDisponiveis", s.rerollsConcedidos);
+                lista.add(m);
             }
-            sb.append("]");
-            enviarJson(exchange, 200, sb.toString());
+            enviarJson(exchange, 200, AdminCrud.json(lista));
         });
 
-        // 5. Painel do Mestre: Intervir na Sessão do Jogador (Dica, Reroll, Impulso Dracónico, Aprovar)
+        // 5. Painel do Mestre: Intervir na Sessão do Jogador (Dica, Reroll, Sorteio de Novas Raças, Impulso Dracónico, Aprovar, Reiniciar)
         criarRota("/api/mestre/assistir-sessao", exchange -> {
             if (tratarCors(exchange)) return;
             Map<String, String> params = lerQueryOuForm(exchange);
@@ -321,17 +369,28 @@ public class ServidorThaluriaAPI {
             String acao = params.getOrDefault("acao", "DICA");
             String textoDica = params.getOrDefault("dica", "");
 
-            SessaoCriacaoFicha sessao = sessoesEmMemoria.get(usuarioId);
+            SessaoCriacaoFicha sessao = obterOuCarregarSessao(usuarioId);
             if (sessao == null) {
-                enviarJson(exchange, 404, "{\"erro\":\"Sessão ativa não encontrada em memória\"}");
+                enviarJson(exchange, 404, "{\"erro\":\"Sessão ativa não encontrada\"}");
                 return;
             }
 
             switch (acao.toUpperCase()) {
                 case "DICA" -> sessao.enviarDicaDoMestre(textoDica);
                 case "REROLL" -> sessao.concederRerollAssistidoPeloMestre(1);
+                case "REROLL_RACA" -> {
+                    UsuarioDAO.ContaUsuario conta = usuarioDAO.buscarPorId(usuarioId);
+                    int pity = conta != null ? conta.getFatorSortePity() : 0;
+                    sessao.rerolarOpcoesRacas(pity, new Random());
+                }
                 case "IMPULSO_DRACONICO" -> sessao.liberarImpulsoDraconico();
                 case "APROVAR" -> sessao.aprovarFichaPeloMestre();
+                case "REINICIAR" -> {
+                    sessoesEmMemoria.remove(usuarioId);
+                    usuarioDAO.excluirSessaoCriacao(usuarioId);
+                    enviarJson(exchange, 200, "{\"status\":\"OK\",\"acaoAplicada\":\"REINICIAR\"}");
+                    return;
+                }
             }
             usuarioDAO.salvarSessaoCriacaoEmTempoReal(usuarioId, sessao, null);
             enviarJson(exchange, 200, "{\"status\":\"OK\",\"acaoAplicada\":\"" + acao + "\"}");
@@ -364,9 +423,11 @@ public class ServidorThaluriaAPI {
                     golpesJson.append("]");
                     bestiarioJson.append(String.format(
                         "{\"id\":\"%s\",\"revelado\":true,\"nome\":\"%s\",\"regiao\":\"%s\",\"elemento\":\"%s\",\"elementoSecundario\":%s,\"porte\":\"%s\","
-                            + "\"chefe\":%b,\"domesticavel\":%b,\"imagemUrl\":%s,\"descricao\":%s,\"golpesPokemon\":%s}",
+                            + "\"chefe\":%b,\"domesticavel\":%b,\"imagemUrl\":%s,\"descricao\":%s,\"golpesPokemon\":%s%s}",
                         m.id, escapar(m.nome), m.regiaoNativa.name(), m.elementoPrimario, AdminCrud.json(m.elementoSecundario), m.porte,
-                        m.chefeSolo, m.domesticavel, AdminCrud.json(m.imagemUrl), AdminCrud.json(m.descricao), golpesJson
+                        m.chefeSolo, m.domesticavel, AdminCrud.json(m.imagemUrl), AdminCrud.json(m.descricao), golpesJson,
+                        // O Mestre vê tudo; este campo diz o que os jogadores enxergam
+                        visaoMestre ? ",\"reveladoJogador\":" + controleMestre.isMonstroReveladoNoBestiario(m.id) : ""
                     ));
                 }
             }
@@ -454,14 +515,22 @@ public class ServidorThaluriaAPI {
             String acao = params.getOrDefault("acao", "");
 
             if ("AVANCAR_DIA".equalsIgnoreCase(acao)) {
-                int dias = Integer.parseInt(params.getOrDefault("dias", "1"));
-                controleMestre.avancarDiasDeMercado(dias, new Random());
-                motorEconomico.avancarTempo(24 * dias);
-                economiaDAO.salvarEstadoCompleto(motorEconomico);
+                // Limite evita travar o servidor simulando anos de mercado num clique
+                int dias = Math.max(1, Math.min(60, Integer.parseInt(params.getOrDefault("dias", "1"))));
+                synchronized (this) {
+                    controleMestre.avancarDiasDeMercado(dias, new Random());
+                    motorEconomico.avancarTempo(24 * dias);
+                    economiaDAO.salvarEstadoCompleto(motorEconomico);
+                }
             } else if ("LIBERAR_WIKI".equalsIgnoreCase(acao)) {
                 controleMestre.liberarCapituloWiki(params.getOrDefault("capitulo", ""));
             } else if ("REVELAR_MONSTRO".equalsIgnoreCase(acao)) {
                 controleMestre.revelarMonstroBestiario(params.getOrDefault("monstroId", ""));
+            } else if ("OCULTAR_MONSTRO".equalsIgnoreCase(acao)) {
+                String monstroId = params.getOrDefault("monstroId", "").trim().toUpperCase(Locale.ROOT);
+                controleMestre.ocultarMonstroBestiario(monstroId);
+                // salvar() só grava os revelados; a chave removida precisa sair do banco
+                permissoesDAO.removerValor("BESTIARIO", monstroId);
             } else if ("VISIBILIDADE_CIDADE".equalsIgnoreCase(acao)) {
                 controleMestre.definirVisibilidadeCidade(
                     params.getOrDefault("cidade", ""),
@@ -478,7 +547,7 @@ public class ServidorThaluriaAPI {
             Map<String, String> params = lerQueryOuForm(exchange);
             int usuarioId = Integer.parseInt(params.getOrDefault("usuarioId", "2"));
 
-            SessaoCriacaoFicha sessao = sessoesEmMemoria.get(usuarioId);
+            SessaoCriacaoFicha sessao = obterOuCarregarSessao(usuarioId);
             if (sessao == null) {
                 enviarJson(exchange, 400, "{\"erro\":\"Nenhuma sessão de criação ativa para este usuário\"}");
                 return;
@@ -487,6 +556,7 @@ public class ServidorThaluriaAPI {
             novaFicha.setUsuarioId(usuarioId);
             fichaDAO.salvar(novaFicha);
             sessoesEmMemoria.remove(usuarioId);
+            usuarioDAO.excluirSessaoCriacao(usuarioId);
 
             enviarJson(exchange, 200, String.format(Locale.US,
                 "{\"status\":\"CRIADA\",\"id\":%d,\"usuarioId\":%d,\"nome\":\"%s\",\"raca\":\"%s\",\"hpMax\":%d,\"manaMax\":%d,\"energiaMax\":%d,\"sanMax\":%d}",
@@ -978,6 +1048,9 @@ public class ServidorThaluriaAPI {
                     permissoesDAO.salvar(controleMestre);
                 }
                 if (e.afetaMundo || "loja_estoque".equals(e.id)) recarregarMundo();
+                // Material com outro bônus ou preço muda as armas da forja que o usam
+                if ("itens".equals(e.id)) new ForjaDAO().recompilarTudo();
+                if (RotasComercio.ENTIDADES_DE_RECEITA.contains(e.id)) rotasComercio.atualizarReceitasDoMotor();
                 enviarJson(exchange, 200, "{\"status\":\"SALVO\",\"id\":" + AdminCrud.json(salvo.id) + "}");
             } catch (AdminCrud.ErroValidacao ex) {
                 enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
@@ -991,6 +1064,7 @@ public class ServidorThaluriaAPI {
                 AdminCrud.Entidade e = adminCrud.obter(p.getOrDefault("entidade", ""));
                 adminCrud.excluir(e, p.get("id"));
                 if (e.afetaMundo || "loja_estoque".equals(e.id)) recarregarMundo();
+                if (RotasComercio.ENTIDADES_DE_RECEITA.contains(e.id)) rotasComercio.atualizarReceitasDoMotor();
                 enviarJson(exchange, 200, "{\"status\":\"EXCLUIDO\"}");
             } catch (AdminCrud.ErroValidacao ex) {
                 enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
@@ -1104,6 +1178,10 @@ public class ServidorThaluriaAPI {
         server.stop(0);
     }
 
+    MotorEconomico getMotorEconomico() { return motorEconomico; }
+
+    EconomiaDAO getEconomiaDAO() { return economiaDAO; }
+
     public int getPorta() {
         return server.getAddress().getPort();
     }
@@ -1153,7 +1231,7 @@ public class ServidorThaluriaAPI {
 
     /** Parâmetros já lidos (e reescritos) pelo porteiro autorizarPedido; o corpo só pode ser lido uma vez. */
     @SuppressWarnings("unchecked")
-    private Map<String, String> lerQueryOuForm(HttpExchange exchange) throws IOException {
+    Map<String, String> lerQueryOuForm(HttpExchange exchange) throws IOException {
         Object lidos = exchange.getAttribute(ATRIBUTO_PARAMS);
         return lidos != null ? (Map<String, String>) lidos : lerParametrosDoPedido(exchange);
     }
@@ -1161,19 +1239,87 @@ public class ServidorThaluriaAPI {
     private Map<String, String> lerParametrosDoPedido(HttpExchange exchange) throws IOException {
         Map<String, String> map = new HashMap<>();
         String query = exchange.getRequestURI().getQuery();
-        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        String combinado = (query != null ? query : "") + "&" + body;
-        for (String par : combinado.split("&")) {
-            if (par.isBlank()) continue;
-            String[] kv = par.split("=", 2);
-            String k = java.net.URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
-            String v = kv.length > 1 ? java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8) : "";
-            map.put(k.trim(), v.trim());
+        if (query != null && !query.isBlank()) {
+            parsearQueryString(query, map);
+        }
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (!body.isEmpty()) {
+            if (body.startsWith("{") && body.endsWith("}")) {
+                parsearJsonSimples(body, map);
+            } else {
+                parsearQueryString(body, map);
+            }
         }
         return map;
     }
 
-    private void enviarJson(HttpExchange exchange, int status, String json) throws IOException {
+    private void parsearJsonSimples(String json, Map<String, String> destino) {
+        String conteudo = json.trim();
+        if (conteudo.startsWith("{") && conteudo.endsWith("}")) {
+            conteudo = conteudo.substring(1, conteudo.length() - 1).trim();
+        }
+        boolean emAspas = false;
+        StringBuilder sbChave = new StringBuilder();
+        StringBuilder sbValor = new StringBuilder();
+        boolean lendoValor = false;
+
+        for (int i = 0; i < conteudo.length(); i++) {
+            char c = conteudo.charAt(i);
+            if (c == '\\' && i + 1 < conteudo.length()) {
+                char prox = conteudo.charAt(i + 1);
+                if (prox == '"' || prox == '\\' || prox == '/') {
+                    (lendoValor ? sbValor : sbChave).append(prox);
+                    i++;
+                    continue;
+                }
+            }
+            if (c == '"') {
+                emAspas = !emAspas;
+                continue;
+            }
+            if (!emAspas && c == ':') {
+                lendoValor = true;
+                continue;
+            }
+            if (!emAspas && c == ',') {
+                String k = sbChave.toString().trim();
+                String v = sbValor.toString().trim();
+                if (!k.isEmpty()) {
+                    destino.put(k, v);
+                }
+                sbChave.setLength(0);
+                sbValor.setLength(0);
+                lendoValor = false;
+                continue;
+            }
+            (lendoValor ? sbValor : sbChave).append(c);
+        }
+        String k = sbChave.toString().trim();
+        String v = sbValor.toString().trim();
+        if (!k.isEmpty()) {
+            destino.put(k, v);
+        }
+    }
+
+    private void parsearQueryString(String dados, Map<String, String> destino) {
+        for (String par : dados.split("&")) {
+            if (par.isBlank()) continue;
+            String[] kv = par.split("=", 2);
+            String k = decodificarUrlSeguro(kv[0]);
+            String v = kv.length > 1 ? decodificarUrlSeguro(kv[1]) : "";
+            destino.put(k.trim(), v.trim());
+        }
+    }
+
+    private static String decodificarUrlSeguro(String s) {
+        try {
+            return java.net.URLDecoder.decode(s, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    void enviarJson(HttpExchange exchange, int status, String json) throws IOException {
         if (status >= 400) {
             totalFalhas.incrementAndGet();
             String metodo = exchange.getRequestMethod();
@@ -1291,7 +1437,9 @@ public class ServidorThaluriaAPI {
             rm.put("reino", r.getReinoOrigem());
             rm.put("raridade", r.getRaridade().name());
             racas.add(rm);
-            if (r.equals(s.getRacaEscolhida())) indiceEscolhido = i;
+            if (s.getRacaEscolhida() != null && r.getNome().equalsIgnoreCase(s.getRacaEscolhida().getNome())) {
+                indiceEscolhido = i;
+            }
         }
         m.put("opcoesRacas", racas);
         m.put("racaEscolhida", s.getRacaEscolhida() != null ? s.getRacaEscolhida().getId() : null);
@@ -1302,6 +1450,9 @@ public class ServidorThaluriaAPI {
         m.put("atributosRolados", attrs);
         m.put("rerolagensPermitidas", s.getRerolagensPermitidas());
         m.put("rerolagensRestantes", s.getRerolagensRestantes());
+        m.put("dicaMestre", s.getUltimaDicaMestre());
+        m.put("aprovadaPeloMestre", s.isAprovadaPeloMestre());
+        m.put("impulsoDraconicoLiberado", s.isImpulsoDraconicoLiberado());
         return AdminCrud.json(m);
     }
 
@@ -1338,7 +1489,7 @@ public class ServidorThaluriaAPI {
     }
 
     /** Recarrega cidades, rotas e lojas do banco após alterações feitas no painel. */
-    private synchronized void recarregarMundo() {
+    synchronized void recarregarMundo() {
         MotorEconomico anterior = this.motorEconomico;
         MotorEconomico novo = economiaDAO.carregarMotorEconomicoCompleto();
         if (anterior != null) {

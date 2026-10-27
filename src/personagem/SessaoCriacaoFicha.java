@@ -24,7 +24,7 @@ public class SessaoCriacaoFicha {
 
     public static class RascunhoFichaEmAndamento {
         private final String idJogador;
-        private final String nomePersonagem;
+        private String nomePersonagem;
         private EtapaCriacao etapaAtual;
 
         private SorteadorRacaCriacao.OpcoesSorteio opcoesRacas;
@@ -44,6 +44,7 @@ public class SessaoCriacaoFicha {
 
         public String getIdJogador() { return idJogador; }
         public String getNomePersonagem() { return nomePersonagem; }
+        public void setNomePersonagem(String nomePersonagem) { this.nomePersonagem = nomePersonagem; }
         public EtapaCriacao getEtapaAtual() { return etapaAtual; }
         public SorteadorRacaCriacao.OpcoesSorteio getOpcoesRacas() { return opcoesRacas; }
         public Raca getRacaEscolhida() { return racaEscolhida; }
@@ -79,6 +80,52 @@ public class SessaoCriacaoFicha {
 
     public String getNomePersonagem() {
         return rascunho.getNomePersonagem();
+    }
+
+    public void setNomePersonagem(String nome) {
+        if (nome != null && !nome.isBlank()) {
+            rascunho.setNomePersonagem(nome.trim());
+        }
+    }
+
+    public SorteadorRacaCriacao.OpcoesSorteio rerolarOpcoesRacas(int fatorSorte, Random r) {
+        rascunho.opcoesRacas = SorteadorRacaCriacao.sortearOpcoesCriacao(fatorSorte, false, impulsoDraconico, r);
+        rascunho.racaEscolhida = null;
+        rascunho.atributosRolados.clear();
+        rascunho.etapaAtual = EtapaCriacao.ESCOLHA_RACA;
+        this.rolagensRealizadas = 0;
+        rascunho.feedbackMestre = "O Mestre concedeu uma nova roletagem de raças!";
+        return rascunho.opcoesRacas;
+    }
+
+    public void restaurarEstado(
+            String nomePersonagem,
+            EtapaCriacao etapa,
+            SorteadorRacaCriacao.OpcoesSorteio opcoes,
+            Raca racaEscolhida,
+            Map<Atributo, Integer> atributos,
+            boolean impulsoDraconico,
+            int rerollsConcedidos,
+            String dicaMestre,
+            boolean aprovada
+    ) {
+        if (nomePersonagem != null && !nomePersonagem.isBlank()) {
+            this.rascunho.setNomePersonagem(nomePersonagem.trim());
+        }
+        if (etapa != null) this.rascunho.etapaAtual = etapa;
+        if (opcoes != null) this.rascunho.opcoesRacas = opcoes;
+        this.rascunho.racaEscolhida = racaEscolhida;
+        if (atributos != null) {
+            this.rascunho.atributosRolados.clear();
+            this.rascunho.atributosRolados.putAll(atributos);
+        }
+        this.impulsoDraconico = impulsoDraconico;
+        this.rascunho.rerollsAssistidosDisponiveis = Math.max(0, rerollsConcedidos);
+        this.rascunho.feedbackMestre = dicaMestre != null ? dicaMestre : "";
+        this.rascunho.aprovadoPeloMestre = aprovada;
+        if (atributos != null && !atributos.isEmpty()) {
+            this.rolagensRealizadas = 1;
+        }
     }
 
     public EtapaCriacao getEtapaAtual() {
