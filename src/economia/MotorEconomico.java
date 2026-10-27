@@ -21,6 +21,11 @@ public class MotorEconomico {
 
     private int diaAtual = 1;
     private int horaAtual = 8;
+    /**
+     * Dia da campanha, que só anda com dias jogados. A disseminação de conhecimento segue este relógio:
+     * simular o mercado (aquecer lojas no início da campanha) não espalha rumores entre cidades.
+     */
+    private int diaCampanha = 1;
 
     /** Rotas já calculadas no ciclo atual (RotaComercial é imutável); limpo a cada dia, pois o perigo muda. */
     private final Map<String, Optional<RotaComercial>> rotasDoDia = new HashMap<>();
@@ -56,11 +61,20 @@ public class MotorEconomico {
      * prazos de missões e deslocamentos físicos de caravanas.
      */
     public void avancarTempo(int horas) {
+        avancarTempo(horas, true);
+    }
+
+    /**
+     * @param passaCampanha false = só o mercado trabalha (vendas, produção, encomendas, caravanas);
+     *                      o dia da campanha e a disseminação de conhecimento ficam parados.
+     */
+    public void avancarTempo(int horas, boolean passaCampanha) {
         for (int i = 0; i < horas; i++) {
             horaAtual++;
             if (horaAtual >= 24) {
                 horaAtual = 0;
                 diaAtual++;
+                if (passaCampanha) diaCampanha++;
                 executarCicloDiario();
             }
             processarMissoesPendentes(1);
@@ -79,12 +93,12 @@ public class MotorEconomico {
         for (Cidade cidade : cidades) {
             // Receitas regionais só saem das cidades que já chegaram à Produção (as comuns valem em todo lugar)
             List<ReceitaLoja> receitasDaCidade = receitas.stream()
-                    .filter(r -> redeConhecimento.receitaLiberada(r.id(), cidade.getId(), diaAtual)).toList();
+                    .filter(r -> redeConhecimento.receitaLiberada(r.id(), cidade.getId(), diaCampanha)).toList();
             for (Lojas loja : cidade.getLojas()) {
                 loja.decairFluxoRecente();
 
                 // Conhecimento que chegou ao estágio Comércio: a loja passa a procurar o item
-                for (Integer itemId : redeConhecimento.itensParaPrateleira(loja, diaAtual)) {
+                for (Integer itemId : redeConhecimento.itensParaPrateleira(loja, diaCampanha)) {
                     Item modelo = catalogoItens.get(itemId);
                     if (modelo != null && !loja.getCatalogoConhecido().containsKey(itemId)) loja.definirDemanda(modelo, 2);
                 }
@@ -101,7 +115,7 @@ public class MotorEconomico {
 
                     // 4. Fornecedores NPC locais (bioma e geologia), só até o estoque-alvo e sem tocar na reserva
                     // (item regional só tem fornecedor local onde já se sabe fazer)
-                    RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(modelo.getId(), cidade.getId(), diaAtual);
+                    RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(modelo.getId(), cidade.getId(), diaCampanha);
                     boolean temFornecedorLocal = estagio == null || estagio == RedeConhecimento.Estagio.PRODUCAO;
                     int falta = loja.estoqueAlvo(modelo.getId()) - loja.getQuantidadeEstoque(modelo.getId());
                     if (temFornecedorLocal && falta > 0 && random.nextDouble() < cidade.calcularChanceFornecedorNpc(modelo)) {
@@ -151,7 +165,7 @@ public class MotorEconomico {
         Cidade destino = compradora.getCidadeSede();
         if (destino == null || itemDesejado == null || qtd <= 0) return false;
         // Item regional só viaja para cidades que pelo menos ouviram falar dele
-        RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(itemDesejado.getId(), destino.getId(), diaAtual);
+        RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(itemDesejado.getId(), destino.getId(), diaCampanha);
         if (estagio != null && !estagio.peloMenos(RedeConhecimento.Estagio.RUMOR)) return false;
 
         Lojas melhorFornecedora = null;
@@ -501,5 +515,9 @@ public class MotorEconomico {
     public int getDiaAtual() { return diaAtual; }
     public int getHoraAtual() { return horaAtual; }
     public void setDiaAtual(int diaAtual) { this.diaAtual = diaAtual; }
+
+    public int getDiaCampanha() { return diaCampanha; }
+
+    public void setDiaCampanha(int diaCampanha) { this.diaCampanha = diaCampanha; }
     public void setHoraAtual(int horaAtual) { this.horaAtual = horaAtual; }
 }

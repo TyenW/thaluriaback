@@ -102,6 +102,11 @@ public class PermissoesMestreDAO {
     public void carregarParaControle(ControlePermissoesMestre c) {
         if (c == null) return;
 
+        // Dia da campanha (era salvo mas nunca relido: todo reinício voltava ao dia 1)
+        try {
+            c.setDiaAtualCampanha(Integer.parseInt(obterValor("CAMPANHA", "dia_atual", "1").trim()));
+        } catch (NumberFormatException ignored) {}
+
         // Wiki
         Map<String, String> wiki = listarPorCategoria("WIKI");
         for (Map.Entry<String, String> e : wiki.entrySet()) {

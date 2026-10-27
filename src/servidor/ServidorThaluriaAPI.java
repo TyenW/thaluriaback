@@ -49,6 +49,8 @@ public class ServidorThaluriaAPI {
      * no HttpServer do JDK os atributos ficam no contexto da rota e vazam entre pedidos simultâneos.
      */
     private final Map<HttpExchange, Map<String, String>> paramsDoPedido = new ConcurrentHashMap<>();
+    /** Máximo de dias simulados num só pedido (um ano de jogo). */
+    static final int MAX_DIAS_POR_AVANCO = 365;
     /** Alterações de ficha reservadas ao Mestre: o jogador apenas consulta. */
     private static final List<String> FICHA_SO_MESTRE = List.of(
             "/api/fichas/inventario/", "/api/fichas/pericias/", "/api/fichas/condicoes/",
@@ -117,8 +119,12 @@ public class ServidorThaluriaAPI {
 
         this.server = HttpServer.create(new InetSocketAddress(porta), 0);
         this.server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-        // O relógio do mercado segue o dia da campanha (o motor recomeçava no dia 1 a cada reinício)
-        this.motorEconomico.setDiaAtual(Math.max(1, controleMestre.getDiaAtualCampanha()));
+        // Dois relógios: a campanha (dias jogados, guia a disseminação) e o mercado, que pode estar à
+        // frente quando o Mestre simula dias sem jogá-los. O motor recomeçava no dia 1 a cada reinício.
+        int diaCampanha = Math.max(1, controleMestre.getDiaAtualCampanha());
+        this.motorEconomico.setDiaCampanha(diaCampanha);
+        this.motorEconomico.setDiaAtual(Math.max(diaCampanha, inteiroSalvo("dia", diaCampanha)));
+        this.motorEconomico.setHoraAtual(Math.max(0, Math.min(23, inteiroSalvo("hora", this.motorEconomico.getHoraAtual()))));
         configurarRotas();
         rotasComercio.registrar();
         rotasForja.registrar();
@@ -547,8 +553,8 @@ public class ServidorThaluriaAPI {
             wikiJson.append("]");
 
             enviarJson(exchange, 200, String.format(
-                "{\"diaMercado\":%d,\"capitulosWiki\":%s,\"cidades\":%s,\"rotas\":%s,\"bestiario\":%s}",
-                controleMestre.getDiaAtualCampanha(), wikiJson, cidadesJson, rotasJson, bestiarioJson
+                "{\"diaCampanha\":%d,\"diaMercado\":%d,\"capitulosWiki\":%s,\"cidades\":%s,\"rotas\":%s,\"bestiario\":%s}",
+                controleMestre.getDiaAtualCampanha(), motorEconomico.getDiaAtual(), wikiJson, cidadesJson, rotasJson, bestiarioJson
             ));
         });
 
@@ -558,13 +564,25 @@ public class ServidorThaluriaAPI {
             Map<String, String> params = lerQueryOuForm(exchange);
             String acao = params.getOrDefault("acao", "");
 
-            if ("AVANCAR_DIA".equalsIgnoreCase(acao)) {
+            if ("AVANCAR_DIA".equalsIgnoreCase(acao) || "SIMULAR_MERCADO".equalsIgnoreCase(acao)) {
+                int dias;
+                try {
+                    dias = Integer.parseInt(params.getOrDefault("dias", "1").trim());
+                } catch (NumberFormatException e) {
+                    dias = 0;
+                }
                 // Limite evita travar o servidor simulando anos de mercado num clique
-                int dias = Math.max(1, Math.min(60, Integer.parseInt(params.getOrDefault("dias", "1"))));
+                if (dias < 1 || dias > MAX_DIAS_POR_AVANCO) {
+                    enviarJson(exchange, 400, "{\"erro\":\"Informe de 1 a " + MAX_DIAS_POR_AVANCO + " dias.\"}");
+                    return;
+                }
+                boolean passaCampanha = "AVANCAR_DIA".equalsIgnoreCase(acao);
                 synchronized (this) {
-                    controleMestre.avancarDiasDeMercado(dias, new Random());
-                    motorEconomico.avancarTempo(24 * dias);
+                    if (passaCampanha) controleMestre.avancarDiasDeMercado(dias, new Random());
+                    motorEconomico.avancarTempo(24 * dias, passaCampanha);
+                    motorEconomico.setDiaCampanha(controleMestre.getDiaAtualCampanha());
                     economiaDAO.salvarEstadoCompleto(motorEconomico);
+                    salvarRelogioDoMercado();
                 }
             } else if ("LIBERAR_WIKI".equalsIgnoreCase(acao)) {
                 controleMestre.liberarCapituloWiki(params.getOrDefault("capitulo", ""));
@@ -582,7 +600,8 @@ public class ServidorThaluriaAPI {
                 );
             }
             permissoesDAO.salvar(controleMestre);
-            enviarJson(exchange, 200, "{\"status\":\"OK\",\"diaAtual\":" + controleMestre.getDiaAtualCampanha() + "}");
+            enviarJson(exchange, 200, "{\"status\":\"OK\",\"diaAtual\":" + controleMestre.getDiaAtualCampanha()
+                    + ",\"diaMercado\":" + motorEconomico.getDiaAtual() + "}");
         });
 
         // 8. Finalizar Criação de Ficha e Persistir no SQLite (FichaDAO)
@@ -1079,6 +1098,16 @@ public class ServidorThaluriaAPI {
             }
         });
 
+        criarRota("/api/admin/ligacoes", exchange -> {
+            if (tratarCors(exchange)) return;
+            Map<String, String> p = lerQueryOuForm(exchange);
+            try {
+                enviarJson(exchange, 200, AdminCrud.json(adminCrud.ligacoes(p.getOrDefault("entidade", ""), p.getOrDefault("id", ""))));
+            } catch (AdminCrud.ErroValidacao ex) {
+                enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(ex.getMessage()) + "}");
+            }
+        });
+
         criarRota("/api/admin/salvar", exchange -> {
             if (tratarCors(exchange)) return;
             Map<String, String> p = lerQueryOuForm(exchange);
@@ -1531,6 +1560,20 @@ public class ServidorThaluriaAPI {
         }
     }
 
+    /** Relógio do mercado, guardado à parte do dia da campanha (podem divergir após simulações). */
+    private void salvarRelogioDoMercado() {
+        permissoesDAO.salvarValor("MERCADO", "dia", String.valueOf(motorEconomico.getDiaAtual()));
+        permissoesDAO.salvarValor("MERCADO", "hora", String.valueOf(motorEconomico.getHoraAtual()));
+    }
+
+    private int inteiroSalvo(String chave, int padrao) {
+        try {
+            return Integer.parseInt(permissoesDAO.obterValor("MERCADO", chave, String.valueOf(padrao)).trim());
+        } catch (NumberFormatException e) {
+            return padrao;
+        }
+    }
+
     /** Recarrega cidades, rotas e lojas do banco após alterações feitas no painel. */
     synchronized void recarregarMundo() {
         MotorEconomico anterior = this.motorEconomico;
@@ -1538,6 +1581,7 @@ public class ServidorThaluriaAPI {
         if (anterior != null) {
             novo.setDiaAtual(anterior.getDiaAtual());
             novo.setHoraAtual(anterior.getHoraAtual());
+            novo.setDiaCampanha(anterior.getDiaCampanha());
         }
         this.motorEconomico = novo;
     }

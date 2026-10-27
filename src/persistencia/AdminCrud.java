@@ -228,16 +228,19 @@ public class AdminCrud {
         golpes.pai = "monstros";
         golpes.colunaPai = "monstro_catalogo_id";
         golpes.colunaTitulo = "nome_golpe";
+        golpes.grupo("Golpe");
         golpes.campo("nome_golpe", "Nome do golpe", TipoCampo.TEXTO).obrigatorio().lista();
         golpes.opcoesCampo("categoria_pokemon", "Categoria", "FISICO", "FISICO_CONTATO", "ESPECIAL_ELEMENTAL", "STATUS_TATICO")
                 .obrigatorio().padrao("FISICO").lista();
         golpes.opcoesCampo("elemento", "Elemento", ELEMENTOS).obrigatorio().padrao("NEUTRO").lista();
+        golpes.grupo("Dano");
         golpes.campo("qtd_dados", "Qtd. de dados", TipoCampo.INTEIRO).obrigatorio().faixa(0, 50).padrao(1).lista();
         golpes.campo("faces_dado", "Faces do dado", TipoCampo.INTEIRO).obrigatorio().faixa(0, 100).padrao(6).lista();
-        golpes.campo("custo_energia", "Custo de energia", TipoCampo.INTEIRO).obrigatorio().minimo(0).padrao(0);
-        golpes.campo("custo_mana", "Custo de mana", TipoCampo.INTEIRO).obrigatorio().minimo(0).padrao(0);
         golpes.opcoesCampo("atributo_escala_1", "Atributo de escala", ATRIBUTOS).obrigatorio().padrao("FOR");
         golpes.opcoesCampo("atributo_escala_2", "2º atributo de escala", ATRIBUTOS);
+        golpes.grupo("Custo e desbloqueio");
+        golpes.campo("custo_energia", "Custo de energia", TipoCampo.INTEIRO).obrigatorio().minimo(0).padrao(0);
+        golpes.campo("custo_mana", "Custo de mana", TipoCampo.INTEIRO).obrigatorio().minimo(0).padrao(0);
         golpes.campo("grau_desbloqueio", "Grau de desbloqueio", TipoCampo.INTEIRO).obrigatorio().faixa(0, 50).padrao(0);
         golpes.campo("slot_inicial", "Slot inicial (0 = não equipado)", TipoCampo.INTEIRO).obrigatorio().faixa(0, 4).padrao(0);
         golpes.campo("efeito_colateral", "Efeito colateral", TipoCampo.TEXTO_LONGO);
@@ -246,10 +249,12 @@ public class AdminCrud {
         drops.chaveAuto = true;
         drops.pai = "monstros";
         drops.colunaPai = "monstro_catalogo_id";
+        drops.grupo("Item e chance");
         drops.ref("item_id", "Item", "itens").obrigatorio().lista().ajuda("Item do catálogo. Crie o item em Itens antes, se ainda não existir.");
         drops.campo("probabilidade", "Probabilidade (0 a 1)", TipoCampo.REAL).obrigatorio().faixa(0, 1).padrao(0.5).lista();
         drops.campo("qtd_min", "Qtd. mínima", TipoCampo.INTEIRO).obrigatorio().faixa(0, 999).padrao(1).lista();
         drops.campo("qtd_max", "Qtd. máxima", TipoCampo.INTEIRO).obrigatorio().faixa(0, 999).padrao(1).lista();
+        drops.grupo("Qualidade");
         drops.enumCampo("raridade", "Raridade", Item.RaridadeItem.values()).obrigatorio().padrao("COMUM");
         drops.campo("qualidade_material", "Qualidade (Q1–Q5)", TipoCampo.INTEIRO).obrigatorio().faixa(1, 5).padrao(1);
         drops.campo("drop_exclusivo", "Drop exclusivo", TipoCampo.BOOLEANO).padrao(false);
@@ -710,6 +715,83 @@ public class AdminCrud {
                 return rs.next() ? rs.getString(1) : null;
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Ligações entre registros (item ↔ receitas ↔ monstros ↔ lojas)
+    // ------------------------------------------------------------------
+
+    /**
+     * Grupos de registros ligados a um item, receita ou monstro, para o painel navegar entre eles.
+     * Cada grupo: {titulo, entidade (aberta ao clicar; null = só informativo), vazio, itens: [{id, nome, detalhe}]}.
+     */
+    public List<Map<String, Object>> ligacoes(String entidade, String id) {
+        List<Map<String, Object>> grupos = new ArrayList<>();
+        try (Connection conn = BancoDados.getConnection()) {
+            switch (entidade) {
+                case "itens" -> {
+                    grupos.add(grupo(conn, "Produzido por", "receitas", "Nenhuma receita produz este item.",
+                            "SELECT id, nome, 'rende ' || quantidade_resultado FROM receitas WHERE item_resultado_id = ? ORDER BY nome", id));
+                    grupos.add(grupo(conn, "Usado como insumo em", "receitas", "Não é insumo de nenhuma receita.",
+                            "SELECT r.id, r.nome, '× ' || i.quantidade FROM receita_insumos i JOIN receitas r ON r.id = i.receita_id"
+                                    + " WHERE i.item_id = ? ORDER BY r.nome", id));
+                    grupos.add(grupo(conn, "Dropado por", "monstros", "Nenhum monstro dropa este item.",
+                            "SELECT m.id, m.nome, CAST(ROUND(d.probabilidade * 100) AS INTEGER) || '% · ' || d.qtd_min || '–' || d.qtd_max"
+                                    + " FROM monstro_drops d JOIN monstros_catalogo m ON m.id = d.monstro_catalogo_id WHERE d.item_id = ? ORDER BY m.nome", id));
+                    grupos.add(grupo(conn, "Coletado em", "cidades", "Não é coletável.",
+                            "SELECT l.cidade_id, COALESCE(c.nome, TRIM(COALESCE(l.regiao, '') || ' ' || COALESCE(l.geologia, '') || ' ' || COALESCE(l.aquifero, ''))),"
+                                    + " CAST(ROUND(l.probabilidade * 100) AS INTEGER) || '% · ' || l.qtd_min || '–' || l.qtd_max"
+                                    + " FROM item_locais_coleta l LEFT JOIN cidades c ON c.id = l.cidade_id WHERE l.item_id = ?", id));
+                    grupos.add(grupo(conn, "Em estoque em", "lojas", "Nenhuma loja tem este item agora.",
+                            "SELECT lj.id, lj.nome, COALESCE(c.nome, '?') || ' · ' || e.quantidade || ' un.' FROM loja_estoque e"
+                                    + " JOIN lojas lj ON lj.id = e.loja_id LEFT JOIN cidades c ON c.id = lj.cidade_id"
+                                    + " WHERE e.item_id = ? AND e.quantidade > 0 ORDER BY e.quantidade DESC LIMIT 30", id));
+                }
+                case "receitas" -> {
+                    grupos.add(grupo(conn, "Produz", "itens", "Item produzido não encontrado.",
+                            "SELECT i.id, i.nome, '× ' || r.quantidade_resultado FROM receitas r JOIN itens i ON i.id = r.item_resultado_id WHERE r.id = ?", id));
+                    grupos.add(grupo(conn, "Lojas que fazem sozinhas", "lojas", "Sem especialidade: qualquer loja pode fazer se o Mestre mandar.",
+                            "SELECT lj.id, lj.nome, COALESCE(c.nome, '?') FROM receitas r JOIN lojas lj ON lj.tipo = r.tipo_loja"
+                                    + " LEFT JOIN cidades c ON c.id = lj.cidade_id WHERE r.id = ? ORDER BY c.nome, lj.nome LIMIT 40", id));
+                }
+                case "monstros" -> {
+                    grupos.add(grupo(conn, "Dropa", "itens", "Nenhum drop cadastrado.",
+                            "SELECT i.id, i.nome, CAST(ROUND(d.probabilidade * 100) AS INTEGER) || '% · ' || d.qtd_min || '–' || d.qtd_max"
+                                    + " FROM monstro_drops d JOIN itens i ON i.id = d.item_id WHERE d.monstro_catalogo_id = ? ORDER BY d.probabilidade DESC", id));
+                    grupos.add(grupo(conn, "Cidades do habitat", "cidades", "Nenhuma cidade fica na região nativa desta espécie.",
+                            "SELECT c.id, c.nome, CASE WHEN c.geologia = m.geologia_nativa THEN 'mesma região e geologia' ELSE 'mesma região' END"
+                                    + " FROM monstros_catalogo m JOIN cidades c ON c.regiao = m.regiao_nativa WHERE m.id = ?"
+                                    + " ORDER BY (c.geologia = m.geologia_nativa) DESC, c.nome", id));
+                }
+                default -> throw new ErroValidacao("Ligações não disponíveis para " + entidade + ".");
+            }
+        } catch (SQLException ex) {
+            throw new RuntimeException("Erro ao buscar ligações: " + ex.getMessage(), ex);
+        }
+        return grupos;
+    }
+
+    /** A consulta devolve (id, nome, detalhe) e recebe o id do registro como único parâmetro. */
+    private static Map<String, Object> grupo(Connection conn, String titulo, String entidade, String vazio, String sql, String id) throws SQLException {
+        List<Map<String, Object>> itens = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", rs.getObject(1));
+                    m.put("nome", rs.getString(2));
+                    m.put("detalhe", rs.getString(3));
+                    itens.add(m);
+                }
+            }
+        }
+        Map<String, Object> g = new LinkedHashMap<>();
+        g.put("titulo", titulo);
+        g.put("entidade", entidade);
+        g.put("vazio", vazio);
+        g.put("itens", itens);
+        return g;
     }
 
     // ------------------------------------------------------------------

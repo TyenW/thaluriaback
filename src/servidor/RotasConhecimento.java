@@ -76,7 +76,7 @@ class RotasConhecimento {
     private Map<String, Object> painel() {
         MotorEconomico motor = servidor.getMotorEconomico();
         RedeConhecimento rede = motor.getRedeConhecimento();
-        int dia = motor.getDiaAtual();
+        int dia = motor.getDiaCampanha();
         ForjaDAO.Catalogo forja = forjaDAO.carregarCatalogo();
         Map<Integer, Map<String, Object>> dadosMapa = servidor.getEconomiaDAO().listarDadosMapa();
 
@@ -175,8 +175,9 @@ class RotasConhecimento {
         throw new AdminCrud.ErroValidacao("Conhecimento não encontrado. Atualize a página.");
     }
 
+    /** A disseminação anda com o dia da campanha, não com o do mercado (que pode ser simulado à frente). */
     private int dia() {
-        return servidor.getMotorEconomico().getDiaAtual();
+        return servidor.getMotorEconomico().getDiaCampanha();
     }
 
     private static Map<String, Object> ok() {

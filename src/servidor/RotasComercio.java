@@ -115,6 +115,7 @@ class RotasComercio {
 
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("dia", dia);
+        r.put("diaCampanha", motor.getDiaCampanha());
         r.put("diasDoResumo", DIAS_DO_RESUMO);
         r.put("totais", totais);
         r.put("lojas", lojas);
@@ -131,7 +132,7 @@ class RotasComercio {
         long caixa = l.getCaixa().getValorTotalEmLatao();
         int cidadeId = l.getCidadeSede() != null ? l.getCidadeSede().getId() : -1;
         boolean conheceReceitas = motor.getReceitas().stream().anyMatch(r -> r.tipoLoja() != null && !r.somenteEncomenda() && r.conhecidaPor(l)
-                && motor.getRedeConhecimento().receitaLiberada(r.id(), cidadeId, motor.getDiaAtual()));
+                && motor.getRedeConhecimento().receitaLiberada(r.id(), cidadeId, motor.getDiaCampanha()));
 
         List<String> alertas = new ArrayList<>();
         if (caixa < Lojas.RESERVA_CAIXA_LATAO * 2) alertas.add("Caixa baixo");
@@ -189,7 +190,7 @@ class RotasComercio {
             m.put("precoCompraLatao", l.calcularPrecoCompraNpcEmLatao(i));
             m.put("reservado", reservados.getOrDefault(i.getId(), 0));
             RedeConhecimento.Estagio estagio = l.getCidadeSede() == null ? null
-                    : motor.getRedeConhecimento().estagioDoItem(i.getId(), l.getCidadeSede().getId(), dia);
+                    : motor.getRedeConhecimento().estagioDoItem(i.getId(), l.getCidadeSede().getId(), motor.getDiaCampanha());
             m.put("estagioConhecimento", estagio != null ? estagio.getRotulo() : null);
             m.put("arma", armas.get(i.getId()));
             estoque.add(m);
@@ -209,7 +210,7 @@ class RotasComercio {
             m.put("conhecida", r.conhecidaPor(l));
             // Receita regional que ainda não chegou à Produção nesta cidade: a IA não a faz (o Mestre ainda pode mandar)
             m.put("regional", motor.getRedeConhecimento().receitaRegional(r.id()));
-            m.put("liberadaAqui", l.getCidadeSede() == null || motor.getRedeConhecimento().receitaLiberada(r.id(), l.getCidadeSede().getId(), dia));
+            m.put("liberadaAqui", l.getCidadeSede() == null || motor.getRedeConhecimento().receitaLiberada(r.id(), l.getCidadeSede().getId(), motor.getDiaCampanha()));
             m.put("especialidade", r.tipoLoja() != null ? r.tipoLoja().getNomeFormatado() : "Qualquer loja");
             m.put("resultadoId", r.itemResultadoId());
             m.put("resultadoNome", resultado != null ? resultado.getNome() : "Item apagado (#" + r.itemResultadoId() + ")");
@@ -272,6 +273,7 @@ class RotasComercio {
 
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("dia", dia);
+        r.put("diaCampanha", motor.getDiaCampanha());
         r.put("loja", resumoLoja(l, comercioDAO.resumirDesde(dia - DIAS_DO_RESUMO + 1).getOrDefault(l.getId(), new long[3]), motor));
         r.put("estoque", estoque);
         r.put("receitas", receitas);
@@ -336,6 +338,7 @@ class RotasComercio {
         }
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("dia", motor.getDiaAtual());
+        r.put("diaCampanha", motor.getDiaCampanha());
         r.put("hora", motor.getHoraAtual());
         r.put("caravanas", lista);
         return r;
@@ -429,7 +432,7 @@ class RotasComercio {
         MotorEconomico motor = servidor.getMotorEconomico();
         Lojas l = loja(p);
         if (l.getCidadeSede() != null) {
-            RedeConhecimento.Estagio estagio = motor.getRedeConhecimento().estagioDoTipo(inteiro(p, "tipoArmaId"), l.getCidadeSede().getId(), motor.getDiaAtual());
+            RedeConhecimento.Estagio estagio = motor.getRedeConhecimento().estagioDoTipo(inteiro(p, "tipoArmaId"), l.getCidadeSede().getId(), motor.getDiaCampanha());
             if (estagio != null && estagio != RedeConhecimento.Estagio.PRODUCAO) {
                 throw new Recusa("Os ferreiros de " + l.getCidadeSede().getNome() + " ainda não sabem fazer este tipo de arma (estágio: "
                         + estagio.getRotulo() + "). Adiante a cidade em Disseminação se quiser forjar mesmo assim.");

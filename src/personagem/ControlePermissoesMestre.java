@@ -127,6 +127,8 @@ public class ControlePermissoesMestre {
     // --- Controle de Campanha do Mestre ---
     public int getDiaAtualCampanha() { return diaAtualCampanha; }
 
+    public void setDiaAtualCampanha(int dia) { diaAtualCampanha = Math.max(1, dia); }
+
     public int avancarDiaMestre(economia.MotorEconomico motor) {
         diaAtualCampanha++;
         if (motor != null) {
