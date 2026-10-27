@@ -46,6 +46,13 @@ public class ServidorThaluriaAPI {
     private static final Set<String> ROTAS_PUBLICAS = Set.of("/api/login", "/api/logout");
     private static final String ATRIBUTO_PARAMS = "thaluria.params";
     private static final String ATRIBUTO_SESSAO = "thaluria.sessao";
+    /** Alterações de ficha reservadas ao Mestre: o jogador apenas consulta. */
+    private static final List<String> FICHA_SO_MESTRE = List.of(
+            "/api/fichas/inventario/", "/api/fichas/pericias/", "/api/fichas/condicoes/",
+            "/api/fichas/magias/", "/api/fichas/excluir");
+    /** Campos de /api/fichas/atualizar que o jogador muda na própria ficha (moedas à parte). */
+    private static final Set<String> CAMPOS_ATUALIZAR_DO_JOGADOR = Set.of(
+            "id", "imagemUrl", "hpAtual", "sanAtual", "energiaAtual", "manaAtual");
 
     /** Tentativas de login falhas por conta: bloqueia após muitas falhas seguidas. */
     private static final int LOGIN_FALHAS_MAX = 8;
@@ -134,7 +141,8 @@ public class ServidorThaluriaAPI {
         if ("/api/conteudo/visivel".equals(rota) || "/api/fichas".equals(rota)) params.put("papel", sessao.papel());
         if (sessao.ehMestre()) return true;
 
-        boolean soMestre = rota.startsWith("/api/admin/") || rota.startsWith("/api/mestre/") || rota.startsWith("/api/fichas/inventario/");
+        boolean soMestre = rota.startsWith("/api/admin/") || rota.startsWith("/api/mestre/")
+                || FICHA_SO_MESTRE.stream().anyMatch(rota::startsWith);
         if (soMestre) {
             enviarJson(exchange, 403, "{\"erro\":\"Apenas o Mestre pode fazer isso.\"}");
             return false;
@@ -155,9 +163,41 @@ public class ServidorThaluriaAPI {
             return exigirDonoDaFicha(exchange, sessao, id);
         }
         if (rota.startsWith("/api/fichas/")) {
-            String id = "/api/fichas/atualizar".equals(rota) || "/api/fichas/excluir".equals(rota)
-                    ? params.getOrDefault("id", "") : params.getOrDefault("fichaId", "");
-            return exigirDonoDaFicha(exchange, sessao, id);
+            boolean atualizar = "/api/fichas/atualizar".equals(rota);
+            String id = atualizar ? params.getOrDefault("id", "") : params.getOrDefault("fichaId", "");
+            if (!exigirDonoDaFicha(exchange, sessao, id)) return false;
+            return !atualizar || conferirAtualizacaoDoJogador(exchange, params, id);
+        }
+        return true;
+    }
+
+    /** Na própria ficha o jogador só troca o retrato, ajusta os recursos em jogo e gasta moedas. */
+    private boolean conferirAtualizacaoDoJogador(HttpExchange exchange, Map<String, String> params, String idBruto) throws IOException {
+        Ficha ficha = null;
+        for (Map.Entry<String, String> campo : params.entrySet()) {
+            if (CAMPOS_ATUALIZAR_DO_JOGADOR.contains(campo.getKey())) continue;
+            Carteira.Moeda moeda = null;
+            if (campo.getKey().startsWith("moeda_")) {
+                try {
+                    moeda = Carteira.Moeda.valueOf(campo.getKey().substring("moeda_".length()));
+                } catch (IllegalArgumentException ignored) {}
+            }
+            if (moeda == null) {
+                enviarJson(exchange, 403, "{\"erro\":\"Apenas o Mestre pode alterar esse campo da ficha.\"}");
+                return false;
+            }
+            int nova;
+            try {
+                nova = Integer.parseInt(campo.getValue().trim());
+            } catch (NumberFormatException ex) {
+                continue; // a rota responde 400 com a mensagem certa
+            }
+            if (ficha == null) ficha = fichaDAO.buscarPorId(Long.parseLong(idBruto.trim()));
+            int atual = ficha != null && ficha.getCarteira() != null ? ficha.getCarteira().getQuantidade(moeda) : 0;
+            if (nova > atual) {
+                enviarJson(exchange, 403, "{\"erro\":\"Apenas o Mestre pode dar moedas ao personagem.\"}");
+                return false;
+            }
         }
         return true;
     }

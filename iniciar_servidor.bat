@@ -26,6 +26,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& { Get-NetTCPConnection
 :: 2. Sincronizar compilacao do codigo Java
 echo [2/4] Sincronizando compilacao das classes Java...
 if not exist "bin" mkdir bin
+if not exist "lib" mkdir lib
+if not exist "lib\sqlite-jdbc.jar" (
+    echo    -^> Driver SQLite nao encontrado, baixando sqlite-jdbc.jar...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& { [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; Invoke-WebRequest -UseBasicParsing -Uri 'https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.46.1.3/sqlite-jdbc-3.46.1.3.jar' -OutFile 'lib\sqlite-jdbc.jar' }"
+)
 "%JAVAC_CMD%" -encoding UTF-8 -cp "lib/sqlite-jdbc.jar;lib/*;src" -d bin src/Main.java src/servidor/ServidorThaluriaAPI.java src/persistencia/*.java 2>nul
 if errorlevel 1 (
     "%JAVAC_CMD%" -encoding UTF-8 -cp "lib/sqlite-jdbc.jar;src" -d bin src/Main.java src/servidor/ServidorThaluriaAPI.java 2>nul
