@@ -44,8 +44,11 @@ public class ServidorThaluriaAPI {
 
     /** Rotas abertas a quem ainda não entrou. */
     private static final Set<String> ROTAS_PUBLICAS = Set.of("/api/login", "/api/logout");
-    private static final String ATRIBUTO_PARAMS = "thaluria.params";
-    private static final String ATRIBUTO_SESSAO = "thaluria.sessao";
+    /**
+     * Parâmetros já conferidos de cada pedido em andamento. Não usa exchange.setAttribute:
+     * no HttpServer do JDK os atributos ficam no contexto da rota e vazam entre pedidos simultâneos.
+     */
+    private final Map<HttpExchange, Map<String, String>> paramsDoPedido = new ConcurrentHashMap<>();
     /** Alterações de ficha reservadas ao Mestre: o jogador apenas consulta. */
     private static final List<String> FICHA_SO_MESTRE = List.of(
             "/api/fichas/inventario/", "/api/fichas/pericias/", "/api/fichas/condicoes/",
@@ -95,6 +98,8 @@ public class ServidorThaluriaAPI {
                 try {
                     enviarJsonDireto(exchange, 500, "{\"erro\":\"Erro interno no servidor: " + escapar(t.getMessage()) + "\"}");
                 } catch (IOException ignored) {}
+            } finally {
+                paramsDoPedido.remove(exchange);
             }
         });
     }
@@ -127,7 +132,7 @@ public class ServidorThaluriaAPI {
      */
     private boolean autorizarPedido(HttpExchange exchange) throws IOException {
         Map<String, String> params = lerParametrosDoPedido(exchange);
-        exchange.setAttribute(ATRIBUTO_PARAMS, params);
+        paramsDoPedido.put(exchange, params);
         String rota = exchange.getRequestURI().getPath();
         if (ROTAS_PUBLICAS.contains(rota)) return true;
 
@@ -136,7 +141,6 @@ public class ServidorThaluriaAPI {
             enviarJson(exchange, 401, "{\"erro\":\"Sessão expirada ou inválida. Entre novamente.\"}");
             return false;
         }
-        exchange.setAttribute(ATRIBUTO_SESSAO, sessao);
         // O que cada um enxerga depende do papel gravado no banco, não do que o navegador diz.
         if ("/api/conteudo/visivel".equals(rota) || "/api/fichas".equals(rota)) params.put("papel", sessao.papel());
         if (sessao.ehMestre()) return true;
@@ -1270,10 +1274,9 @@ public class ServidorThaluriaAPI {
     }
 
     /** Parâmetros já lidos (e reescritos) pelo porteiro autorizarPedido; o corpo só pode ser lido uma vez. */
-    @SuppressWarnings("unchecked")
     Map<String, String> lerQueryOuForm(HttpExchange exchange) throws IOException {
-        Object lidos = exchange.getAttribute(ATRIBUTO_PARAMS);
-        return lidos != null ? (Map<String, String>) lidos : lerParametrosDoPedido(exchange);
+        Map<String, String> lidos = paramsDoPedido.get(exchange);
+        return lidos != null ? lidos : lerParametrosDoPedido(exchange);
     }
 
     private Map<String, String> lerParametrosDoPedido(HttpExchange exchange) throws IOException {
