@@ -309,6 +309,9 @@ class RotasComercio {
             m.put("statusDescricao", c.getStatus().getDescricao());
             m.put("protecao", c.getProtecao().name());
             m.put("protecaoDescricao", c.getProtecao().getDescricao());
+            m.put("servico", c.getServico().name());
+            m.put("servicoDescricao", c.getServico().getDescricao());
+            m.put("velocidadeKmH", c.getServico().getVelocidadeTerrestreKmH());
             m.put("itemId", c.getCarga().getId());
             m.put("carga", c.getCarga().getNome());
             m.put("quantidade", c.getCarga().getQuantidade());

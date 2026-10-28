@@ -405,9 +405,12 @@ public class MenuComercio {
             System.out.printf("  Carga                 : %s (x%d)\n", novaCaravana.getCarga().getNome(), novaCaravana.getCarga().getQuantidade());
             System.out.printf("  Distância Total Rota  : %d km (Perigo Médio: %.1f/10)\n",
                     novaCaravana.getRota().getDistanciaTotalKm(), novaCaravana.getRota().getPerigoMedio());
-            System.out.printf("  Frete Pago            : %s\n", novaCaravana.getRota().descreverCustoFrete(novaCaravana.getCarga().getPesoTotal()));
+            System.out.printf("  Serviço de Transporte : %s (%.0f km/h)\n",
+                    novaCaravana.getServico(), novaCaravana.getServico().getVelocidadeTerrestreKmH());
+            System.out.printf("  Frete Pago            : %s\n", Carteira.formatarLatao(novaCaravana.getRota()
+                    .calcularCustoFreteEmLatao(novaCaravana.getCarga().getPesoTotal(), novaCaravana.getServico())));
 
-            if (novaCaravana.getRota().recomendaEscolta()) {
+            if (novaCaravana.getRota().recomendaEscolta(novaCaravana.getServico())) {
                 System.out.println("  ⚠️ Rota perigosa! Uma MISSÃO DE ESCOLTA foi criada no Quadro de Avisos com 12h de prazo.");
             } else {
                 System.out.println("  ✓ Rota considerada segura. A caravana partiu imediatamente desprotegida.");

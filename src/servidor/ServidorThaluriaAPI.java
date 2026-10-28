@@ -517,6 +517,16 @@ public class ServidorThaluriaAPI {
                     cm.put("geologia", c.getGeologia() != null ? c.getGeologia().name() : null);
                     cm.put("aquifero", c.getAquifero() != null ? c.getAquifero().name() : null);
                     cm.put("lojas", c.getLojas().size());
+                    // Nome e especialidade de cada loja, para a ficha da cidade no mapa
+                    List<Map<String, Object>> lojasCidade = new ArrayList<>();
+                    for (economia.Lojas l : c.getLojas()) {
+                        Map<String, Object> lm = new LinkedHashMap<>();
+                        lm.put("id", l.getId());
+                        lm.put("nome", l.getNome());
+                        lm.put("tipo", l.getTipoEstabelecimento().getNomeFormatado());
+                        lojasCidade.add(lm);
+                    }
+                    cm.put("lojasLista", lojasCidade);
                     cm.put("descricao", mapa.get("descricao"));
                 }
                 cidadesLista.add(cm);

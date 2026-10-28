@@ -188,8 +188,8 @@ public class ComercioDAO {
         }
         String sql = """
             INSERT INTO caravanas_ativas (id, loja_origem_id, loja_destino_id, item_id, quantidade, caminho_cidades, tipos_trechos,
-                                          indice_trecho, km_no_trecho, status, protecao, dia_evento, hora_evento)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          indice_trecho, km_no_trecho, status, protecao, dia_evento, hora_evento, servico)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (Caravana c : motor.getCaravanasAtivas()) {
@@ -210,6 +210,7 @@ public class ComercioDAO {
                 ps.setString(11, c.getProtecao().name());
                 ps.setInt(12, c.getDiaUltimoEvento());
                 ps.setInt(13, c.getHoraUltimoEvento());
+                ps.setString(14, c.getServico().name());
                 ps.addBatch();
             }
             ps.executeBatch();
@@ -241,6 +242,7 @@ public class ComercioDAO {
                     continue;
                 }
                 Caravana c = Caravana.restaurar(rs.getInt("id"), origem, destino, carga, rota,
+                        enumOu(ServicoTransporte.class, rs.getString("servico"), ServicoTransporte.COMUM),
                         enumOu(Caravana.StatusCaravana.class, rs.getString("status"), Caravana.StatusCaravana.EM_TRANSITO),
                         enumOu(Caravana.TipoProtecao.class, rs.getString("protecao"), Caravana.TipoProtecao.DESPROTEGIDA),
                         rs.getInt("indice_trecho"), rs.getDouble("km_no_trecho"), rs.getInt("dia_evento"), rs.getInt("hora_evento"));

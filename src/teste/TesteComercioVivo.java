@@ -44,6 +44,7 @@ public class TesteComercioVivo {
         testarIaDoMercador();
         testarOrdensDoMestre();
         testarEncomendasECaravanas();
+        testarServicosDeTransporte();
 
         // 2. Banco, sementes, persistência, estabilidade e API (banco de teste)
         apagarBancoTeste();
@@ -111,7 +112,7 @@ public class TesteComercioVivo {
     // ------------------------------------------------------------------
 
     private static void testarClientelaNpc() {
-        System.out.println("[1/9] Clientela NPC (vendas de balcão)...");
+        System.out.println("[1/10] Clientela NPC (vendas de balcão)...");
         Item pao = item(1, "Pão de Teste", 10_000, Item.TipoItem.CONSUMIVEL);
 
         Lojas capital = loja("Padaria da Capital", cidade("Capital", Cidade.TipoAssentamento.REINO), Lojas.TipoEstabelecimento.TAVERNA, 50_000);
@@ -151,7 +152,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarReposicaoEReserva() {
-        System.out.println("\n[2/9] Reposição por fornecedores e reserva de caixa...");
+        System.out.println("\n[2/10] Reposição por fornecedores e reserva de caixa...");
         MotorEconomico motor = new MotorEconomico(new Random(11));
         Cidade c = cidade("Entreposto", Cidade.TipoAssentamento.CIDADE);
         Item tocha = item(10, "Tocha de Teste", 1_000, Item.TipoItem.CONSUMIVEL);
@@ -180,7 +181,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarIaDoMercador() {
-        System.out.println("\n[3/9] IA do mercador (receitas por lucro diário)...");
+        System.out.println("\n[3/10] IA do mercador (receitas por lucro diário)...");
         Cidade c = cidade("Forjaria", Cidade.TipoAssentamento.CIDADE);
         Item lingote = item(20, "Lingote T", 3_000, Item.TipoItem.MATERIAL);
         Item gema = item(21, "Gema T", 5_000, Item.TipoItem.MATERIAL);
@@ -224,7 +225,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarOrdensDoMestre() {
-        System.out.println("\n[4/9] Ordens do Mestre como mercador...");
+        System.out.println("\n[4/10] Ordens do Mestre como mercador...");
         Cidade c = cidade("Oficina Real", Cidade.TipoAssentamento.CIDADE);
         Item linho = item(30, "Linho T", 2_000, Item.TipoItem.MATERIAL);
         Item capa = item(31, "Capa T", 15_000, Item.TipoItem.ARMADURA);
@@ -249,7 +250,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarEncomendasECaravanas() {
-        System.out.println("\n[5/9] Encomendas entre cidades e caravanas...");
+        System.out.println("\n[5/10] Encomendas entre cidades e caravanas...");
         MotorEconomico motor = new MotorEconomico(new Random(5));
         Cidade mina = cidade("Mina", Cidade.TipoAssentamento.CIDADE);
         Cidade porto = cidade("Porto", Cidade.TipoAssentamento.CIDADE);
@@ -284,7 +285,9 @@ public class TesteComercioVivo {
         afirme(motor.temCaravanaAtivaPara(compradora, 40), "Não se encomenda de novo o que já está a caminho.");
 
         double horas = caravana.horasRestantesEstimadas();
-        afirme(horas > 1 && horas < 2, "Previsão de chegada: 10 km a 6 km/h ≈ " + String.format("%.1f", horas) + " h.");
+        double velocidade = caravana.getServico().getVelocidadeTerrestreKmH();
+        afirme(Math.abs(horas - 10 / velocidade) < 0.01, "Previsão de chegada: 10 km a " + String.format("%.0f", velocidade)
+                + " km/h (" + caravana.getServico() + ") ≈ " + String.format("%.1f", horas) + " h.");
         motor.avancarTempo(1);
         afirme(caravana.kmPercorridos() > 0 && caravana.kmPercorridos() < 10, "Após 1 h a caravana está no meio da estrada (" + String.format("%.1f", caravana.kmPercorridos()) + " km).");
         motor.avancarTempo(5);
@@ -294,6 +297,87 @@ public class TesteComercioVivo {
         motor.setDiaAtual(motor.getDiaAtual() + 9);
         motor.executarCicloDiario();
         afirme(!motor.getCaravanas().contains(caravana), "Caravanas entregues há mais de uma semana saem da memória.");
+    }
+
+    /** Sorteio que nunca cai no ataque: a caravana só anda. */
+    private static final Random SEM_ATAQUE = new Random() {
+        @Override public double nextDouble() { return 0.999999; }
+    };
+
+    private static void testarServicosDeTransporte() {
+        System.out.println("\n[6/10] Serviços de transporte (velocidade, risco e frete)...");
+        Cidade a = cidade("Ponta A", Cidade.TipoAssentamento.CIDADE);
+        Cidade b = cidade("Ponta B", Cidade.TipoAssentamento.CIDADE);
+        Conexao estrada = new Conexao(a, b, 100, 6, Conexao.TipoDeRota.TERRESTRE);
+        RotaComercial rota = new RotaComercial(List.of(a, b), List.of(estrada));
+        Lojas la = loja("Loja A", a, Lojas.TipoEstabelecimento.LOJA_GERAL, 1_000_000);
+        Lojas lb = loja("Loja B", b, Lojas.TipoEstabelecimento.LOJA_GERAL, 1_000_000);
+        Item carga = item(50, "Caixote T", 10_000, Item.TipoItem.MATERIAL);
+
+        Map<ServicoTransporte, Double> kmEmUmaHora = new EnumMap<>(ServicoTransporte.class);
+        for (ServicoTransporte s : ServicoTransporte.values()) {
+            Caravana c = new Caravana(la, lb, Lojas.clonarItem(carga, 1), rota, s, 1, 8);
+            c.iniciarViagem(Caravana.TipoProtecao.DESPROTEGIDA, 1, 8);
+            c.avancarHoras(1, 1, 9, SEM_ATAQUE);
+            kmEmUmaHora.put(s, c.kmPercorridos());
+        }
+        afirme(Math.abs(kmEmUmaHora.get(ServicoTransporte.COMUM) - 6) < 0.01
+                && Math.abs(kmEmUmaHora.get(ServicoTransporte.EXPRESSO) - 10) < 0.01
+                && Math.abs(kmEmUmaHora.get(ServicoTransporte.COMBOIO_BLINDADO) - 4) < 0.01
+                && Math.abs(kmEmUmaHora.get(ServicoTransporte.GUARDA_REAL) - 9) < 0.01,
+                "Cada serviço anda na sua velocidade em 1 h: " + kmEmUmaHora + ".");
+        afirme(Math.abs(rota.horasDeViagem(ServicoTransporte.EXPRESSO) - 10) < 0.01, "100 km de Expresso levam 10 h.");
+
+        long freteComum = rota.calcularCustoFreteEmLatao(50, ServicoTransporte.COMUM);
+        afirme(freteComum == rota.calcularCustoFreteEmLatao(50), "O frete sem serviço é o da Caravana Comum.");
+        afirme(freteComum < rota.calcularCustoFreteEmLatao(50, ServicoTransporte.EXPRESSO)
+                && rota.calcularCustoFreteEmLatao(50, ServicoTransporte.EXPRESSO) < rota.calcularCustoFreteEmLatao(50, ServicoTransporte.COMBOIO_BLINDADO)
+                && rota.calcularCustoFreteEmLatao(50, ServicoTransporte.COMBOIO_BLINDADO) < rota.calcularCustoFreteEmLatao(50, ServicoTransporte.GUARDA_REAL),
+                "Frete: Comum < Expresso < Blindado < Guarda Real.");
+        double chanceComum = rota.chanceDeAtaque(ServicoTransporte.COMUM, 1.0);
+        double chanceBlindado = rota.chanceDeAtaque(ServicoTransporte.COMBOIO_BLINDADO, 1.0);
+        double chanceReal = rota.chanceDeAtaque(ServicoTransporte.GUARDA_REAL, 1.0);
+        afirme(chanceBlindado < chanceComum && chanceReal < chanceBlindado,
+                String.format("Chance de ataque na viagem: Comum %.0f%%, Blindado %.0f%%, Real %.0f%%.",
+                        chanceComum * 100, chanceBlindado * 100, chanceReal * 100));
+        afirme(rota.recomendaEscolta(ServicoTransporte.COMUM) && rota.recomendaEscolta(ServicoTransporte.EXPRESSO)
+                && !rota.recomendaEscolta(ServicoTransporte.COMBOIO_BLINDADO) && !rota.recomendaEscolta(ServicoTransporte.GUARDA_REAL),
+                "Em estrada de perigo 6, só os serviços seguros dispensam escolta.");
+
+        // Carga valiosa por estrada perigosa: o mercador paga por segurança e não precisa de escolta
+        MotorEconomico motor = new MotorEconomico(new Random(7));
+        Cidade mina = cidade("Mina Funda", Cidade.TipoAssentamento.CIDADE);
+        Cidade feira = cidade("Feira Alta", Cidade.TipoAssentamento.CIDADE);
+        new Conexao(mina, feira, 120, 7, Conexao.TipoDeRota.TERRESTRE);
+        Item joia = item(51, "Joia T", 200_000, Item.TipoItem.MATERIAL);
+        Lojas joalheiro = loja("Joalheiro", mina, Lojas.TipoEstabelecimento.JOALHERIA, 100_000);
+        joalheiro.adicionarItem(Lojas.clonarItem(joia, 20));
+        Lojas comprador = loja("Comprador", feira, Lojas.TipoEstabelecimento.LOJA_GERAL, 50_000_000);
+        comprador.definirDemanda(joia, 10);
+        for (Cidade c : List.of(mina, feira)) motor.registrarCidade(c);
+        motor.definirReceitasECatalogo(List.of(), List.of(joia));
+        afirme(motor.solicitarCompraEntreCidades(comprador, joia, 5), "Joias são encomendadas pela estrada perigosa.");
+        Caravana joias = motor.getCaravanas().get(0);
+        afirme(joias.getServico().getFatorRisco() < 1, "Carga valiosa em estrada perigosa vai por serviço seguro (" + joias.getServico() + ").");
+        afirme(joias.getStatus() == Caravana.StatusCaravana.EM_TRANSITO && motor.missaoAbertaDa(joias) == null,
+                "O serviço seguro parte na hora, sem missão de escolta.");
+
+        // Carga pesada de pouco valor, estrada curta e segura, prateleira abastecida: o frete mais barato vence
+        MotorEconomico motor2 = new MotorEconomico(new Random(7));
+        Cidade vila = cidade("Vila Mansa", Cidade.TipoAssentamento.VILA);
+        Cidade burgo = cidade("Burgo Manso", Cidade.TipoAssentamento.CIDADE);
+        new Conexao(vila, burgo, 30, 1, Conexao.TipoDeRota.TERRESTRE);
+        Item tijolo = new Item(52, "Tijolo T", "Item de teste", 2.0, 20.0, Item.TipoItem.MATERIAL, Item.RaridadeItem.COMUM, 1);
+        Lojas olaria = loja("Olaria", vila, Lojas.TipoEstabelecimento.LOJA_GERAL, 100_000);
+        olaria.adicionarItem(Lojas.clonarItem(tijolo, 20));
+        Lojas obra = loja("Obra", burgo, Lojas.TipoEstabelecimento.LOJA_GERAL, 5_000_000);
+        obra.adicionarItem(Lojas.clonarItem(tijolo, 3));
+        obra.definirDemanda(tijolo, 10);
+        for (Cidade c : List.of(vila, burgo)) motor2.registrarCidade(c);
+        motor2.definirReceitasECatalogo(List.of(), List.of(tijolo));
+        afirme(motor2.solicitarCompraEntreCidades(obra, tijolo, 5), "Tijolos são encomendados pela estrada curta.");
+        ServicoTransporte servicoTijolo = motor2.getCaravanas().get(0).getServico();
+        afirme(servicoTijolo == ServicoTransporte.COMUM, "Carga pesada e barata em estrada segura vai pela Caravana Comum (" + servicoTijolo + ").");
     }
 
     // ------------------------------------------------------------------
@@ -307,8 +391,12 @@ public class TesteComercioVivo {
     }
 
     private static void testarSementesDasLojasBase() throws Exception {
-        System.out.println("\n[6/9] Sementes: lojas-base, receitas e itens de ofício...");
+        System.out.println("\n[7/10] Sementes: lojas-base, receitas e itens de ofício...");
         MotorEconomico motor = new EconomiaDAO().carregarMotorEconomicoCompleto();
+
+        long maritimas = contar("SELECT COUNT(*) FROM conexoes WHERE tipo_rota = 'MARITIMA'");
+        afirme(maritimas > 0 && contar("SELECT COUNT(*) FROM conexoes WHERE tipo_rota = 'MARITIMA' AND bloqueada = 0") == 0,
+                "As " + maritimas + " rotas marítimas continuam cadastradas, todas bloqueadas.");
 
         boolean todasComLoja = motor.getCidades().stream().allMatch(c -> !c.getLojas().isEmpty());
         afirme(todasComLoja, "Todas as " + motor.getCidades().size() + " cidades têm lojas.");
@@ -340,7 +428,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarPersistenciaCompleta() throws Exception {
-        System.out.println("\n[7/9] Persistência: caixa, estoque, nível, ordens, livro-caixa e caravanas...");
+        System.out.println("\n[8/10] Persistência: caixa, estoque, nível, ordens, livro-caixa e caravanas...");
         EconomiaDAO dao = new EconomiaDAO();
         MotorEconomico motor = dao.carregarMotorEconomicoCompleto();
         motor.avancarTempo(24 * 6);
@@ -358,7 +446,13 @@ public class TesteComercioVivo {
             ordens.put(l.getId(), l.getOrdensReceita().size());
         }
         Map<Integer, Double> posicoes = new HashMap<>();
-        for (Caravana c : motor.getCaravanasAtivas()) posicoes.put(c.getId(), c.kmPercorridos());
+        Map<Integer, ServicoTransporte> servicos = new HashMap<>();
+        for (Caravana c : motor.getCaravanasAtivas()) {
+            posicoes.put(c.getId(), c.kmPercorridos());
+            servicos.put(c.getId(), c.getServico());
+        }
+        afirme(motor.getCaravanasAtivas().stream().flatMap(c -> c.getRota().getArestas().stream())
+                .noneMatch(a -> a.getTipo() == Conexao.TipoDeRota.MARITIMA), "Nenhuma caravana viaja pelo mar.");
         dao.salvarEstadoCompleto(motor);
 
         MotorEconomico recarregado = dao.carregarMotorEconomicoCompleto();
@@ -377,9 +471,9 @@ public class TesteComercioVivo {
         boolean mesmasPosicoes = recarregado.getCaravanasAtivas().size() == posicoes.size();
         for (Caravana c : recarregado.getCaravanasAtivas()) {
             Double antes = posicoes.get(c.getId());
-            mesmasPosicoes &= antes != null && Math.abs(antes - c.kmPercorridos()) < 0.01;
+            mesmasPosicoes &= antes != null && Math.abs(antes - c.kmPercorridos()) < 0.01 && servicos.get(c.getId()) == c.getServico();
         }
-        afirme(mesmasPosicoes, "As caravanas voltam com o mesmo id e no mesmo ponto da estrada.");
+        afirme(mesmasPosicoes, "As caravanas voltam com o mesmo id, serviço e ponto da estrada.");
 
         ComercioDAO comercio = new ComercioDAO();
         afirme(!comercio.listarMovimentacoes(alvo.getId(), 10).isEmpty(), "O livro-caixa da loja pode ser consultado.");
@@ -387,7 +481,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarEstabilidadeDoMundo() {
-        System.out.println("\n[8/9] Estabilidade do mundo real em 60 dias...");
+        System.out.println("\n[9/10] Estabilidade do mundo real em 60 dias...");
         MotorEconomico motor = new EconomiaDAO().carregarMotorEconomicoCompleto();
         List<Lojas> lojas = motor.getCidades().stream().flatMap(c -> c.getLojas().stream()).toList();
         long caixaInicial = lojas.stream().mapToLong(l -> l.getCaixa().getValorTotalEmLatao()).sum();
@@ -452,7 +546,7 @@ public class TesteComercioVivo {
     }
 
     private static void testarApiDoMestre() throws Exception {
-        System.out.println("\n[9/9] API da aba de Comércio do Mestre...");
+        System.out.println("\n[10/10] API da aba de Comércio do Mestre...");
         UsuarioDAO usuarios = new UsuarioDAO();
         usuarios.cadastrarUsuario("mestre_teste", "segredo-do-teste", "MESTRE", 999);
         UsuarioDAO.ContaUsuario jogador = usuarios.cadastrarUsuario("jogador_teste", "senha-do-jogador", "JOGADOR", 3);

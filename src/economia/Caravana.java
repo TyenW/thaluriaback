@@ -8,8 +8,8 @@ import java.util.Random;
 
 /**
  * Modela uma expedição comercial de transporte de mercadorias no grafo territorial de Thaluria.
- * Acompanha o deslocamento quilômetro a quilômetro entre as conexões, calcula a velocidade
- * conforme o tipo de trajeto (terrestre ou marítimo) e avalia o risco de emboscadas e extravio.
+ * Acompanha o deslocamento quilômetro a quilômetro entre as conexões, com a velocidade e o
+ * risco de emboscada dados pelo {@link ServicoTransporte} contratado e pelo tipo de trajeto.
  */
 public class Caravana {
 
@@ -57,6 +57,9 @@ public class Caravana {
         }
     }
 
+    /** Multiplicador do risco por hora com escolta de mercenários NPCs (-75%). */
+    public static final double FATOR_RISCO_ESCOLTA_NPC = 0.25;
+
     private static int sequencialId = 1;
 
     private final int id;
@@ -64,6 +67,7 @@ public class Caravana {
     private final Lojas lojaDestino;
     private final Item carga;
     private final RotaComercial rota;
+    private final ServicoTransporte servico;
 
     private StatusCaravana status;
     private TipoProtecao protecao;
@@ -74,11 +78,16 @@ public class Caravana {
     private int horaUltimoEvento;
 
     public Caravana(Lojas lojaOrigem, Lojas lojaDestino, Item carga, RotaComercial rota, int dia, int hora) {
+        this(lojaOrigem, lojaDestino, carga, rota, ServicoTransporte.COMUM, dia, hora);
+    }
+
+    public Caravana(Lojas lojaOrigem, Lojas lojaDestino, Item carga, RotaComercial rota, ServicoTransporte servico, int dia, int hora) {
         this.id = sequencialId++;
         this.lojaOrigem = Objects.requireNonNull(lojaOrigem, "Loja de origem não pode ser nula");
         this.lojaDestino = Objects.requireNonNull(lojaDestino, "Loja de destino não pode ser nula");
         this.carga = Objects.requireNonNull(carga, "Carga não pode ser nula");
         this.rota = Objects.requireNonNull(rota, "Rota comercial não pode ser nula");
+        this.servico = servico != null ? servico : ServicoTransporte.COMUM;
         this.status = StatusCaravana.AGUARDANDO_ESCOLTA;
         this.protecao = TipoProtecao.DESPROTEGIDA;
         this.diaUltimoEvento = dia;
@@ -90,9 +99,9 @@ public class Caravana {
      * Os próximos ids continuam depois dos restaurados.
      */
     public static Caravana restaurar(int id, Lojas origem, Lojas destino, Item carga, RotaComercial rota,
-                                     StatusCaravana status, TipoProtecao protecao, int indiceAresta, double kmNaAresta,
-                                     int dia, int hora) {
-        Caravana c = new Caravana(origem, destino, carga, rota, dia, hora, id);
+                                     ServicoTransporte servico, StatusCaravana status, TipoProtecao protecao,
+                                     int indiceAresta, double kmNaAresta, int dia, int hora) {
+        Caravana c = new Caravana(origem, destino, carga, rota, servico, dia, hora, id);
         c.status = status != null ? status : StatusCaravana.EM_TRANSITO;
         c.protecao = protecao != null ? protecao : TipoProtecao.DESPROTEGIDA;
         c.indiceArestaAtual = Math.max(0, indiceAresta);
@@ -103,12 +112,14 @@ public class Caravana {
         return c;
     }
 
-    private Caravana(Lojas lojaOrigem, Lojas lojaDestino, Item carga, RotaComercial rota, int dia, int hora, int id) {
+    private Caravana(Lojas lojaOrigem, Lojas lojaDestino, Item carga, RotaComercial rota, ServicoTransporte servico,
+                     int dia, int hora, int id) {
         this.id = id;
         this.lojaOrigem = Objects.requireNonNull(lojaOrigem, "Loja de origem não pode ser nula");
         this.lojaDestino = Objects.requireNonNull(lojaDestino, "Loja de destino não pode ser nula");
         this.carga = Objects.requireNonNull(carga, "Carga não pode ser nula");
         this.rota = Objects.requireNonNull(rota, "Rota comercial não pode ser nula");
+        this.servico = servico != null ? servico : ServicoTransporte.COMUM;
         this.status = StatusCaravana.AGUARDANDO_ESCOLTA;
         this.protecao = TipoProtecao.DESPROTEGIDA;
         this.diaUltimoEvento = dia;
@@ -121,14 +132,14 @@ public class Caravana {
                 || status == StatusCaravana.EXTRAVIADA;
     }
 
-    /** Horas de viagem até o destino, nas velocidades atuais (terra 6 km/h, mar 14 km/h). */
+    /** Horas de viagem até o destino, na velocidade do serviço contratado. */
     public double horasRestantesEstimadas() {
         List<Conexao> arestas = rota.getArestas();
         double horas = 0;
         for (int i = indiceArestaAtual; i < arestas.size(); i++) {
             Conexao a = arestas.get(i);
             double km = a.getDistanciaKm() - (i == indiceArestaAtual ? kmNaArestaAtual : 0);
-            horas += Math.max(0, km) / (a.getTipo() == Conexao.TipoDeRota.MARITIMA ? 14.0 : 6.0);
+            horas += Math.max(0, km) / servico.velocidadeKmH(a);
         }
         return horas;
     }
@@ -166,7 +177,7 @@ public class Caravana {
 
         while (horasRestantes > 0 && indiceArestaAtual < arestas.size()) {
             Conexao aresta = arestas.get(indiceArestaAtual);
-            double velocidadeKmH = (aresta.getTipo() == Conexao.TipoDeRota.MARITIMA) ? 14.0 : 6.0;
+            double velocidadeKmH = servico.velocidadeKmH(aresta);
             double kmRestantesTrecho = aresta.getDistanciaKm() - kmNaArestaAtual;
             double tempoParaConcluirTrecho = kmRestantesTrecho / velocidadeKmH;
 
@@ -176,9 +187,9 @@ public class Caravana {
 
             // Se o jogador está escoltando, a segurança é absoluta (100%)
             if (protecao != TipoProtecao.ESCOLTADA_JOGADOR) {
-                double riscoHora = aresta.getPerigo() * 0.012;
+                double riscoHora = servico.riscoPorHora(aresta);
                 if (protecao == TipoProtecao.ESCOLTADA_NPC) {
-                    riscoHora *= 0.25; // Escolta de NPCs reduz o perigo em 75%
+                    riscoHora *= FATOR_RISCO_ESCOLTA_NPC; // Escolta de NPCs reduz o perigo em 75%
                 }
                 double chanceAtaque = 1.0 - Math.pow(1.0 - riscoHora, Math.max(0.01, tempoGasto));
                 if (random != null && random.nextDouble() < chanceAtaque) {
@@ -258,6 +269,7 @@ public class Caravana {
     public Cidade getCidadeDestino() { return (lojaDestino != null) ? lojaDestino.getCidadeSede() : null; }
     public Item getCarga() { return carga; }
     public RotaComercial getRota() { return rota; }
+    public ServicoTransporte getServico() { return servico; }
     public StatusCaravana getStatus() { return status; }
     public void setStatus(StatusCaravana status) { this.status = status; }
     public TipoProtecao getProtecao() { return protecao; }
@@ -282,11 +294,11 @@ public class Caravana {
 
     @Override
     public String toString() {
-        return String.format("Caravana #%d [%s -> %s] | Carga: %s (x%d) | Status: %s (%s) | %s",
+        return String.format("Caravana #%d [%s -> %s] | %s | Carga: %s (x%d) | Status: %s (%s) | %s",
                 id,
                 (lojaOrigem.getCidadeSede() != null ? lojaOrigem.getCidadeSede().getNome() : lojaOrigem.getNome()),
                 (lojaDestino.getCidadeSede() != null ? lojaDestino.getCidadeSede().getNome() : lojaDestino.getNome()),
-                carga.getNome(), carga.getQuantidade(),
+                servico.getDescricao(), carga.getNome(), carga.getQuantidade(),
                 status.getDescricao(), protecao.getDescricao(),
                 descreverPosicaoNoGrafo());
     }

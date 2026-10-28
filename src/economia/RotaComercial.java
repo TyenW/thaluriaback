@@ -142,10 +142,18 @@ public class RotaComercial {
      * @return custo do frete em latão
      */
     public long calcularCustoFreteEmLatao(double pesoTotalKg) {
+        return calcularCustoFreteEmLatao(pesoTotalKg, ServicoTransporte.COMUM);
+    }
+
+    /**
+     * Frete em latão pelo serviço de transporte escolhido: a fórmula base vezes o
+     * fator de frete do serviço (Comum = 1,0).
+     */
+    public long calcularCustoFreteEmLatao(double pesoTotalKg, ServicoTransporte servico) {
         double peso = Math.max(0.0, pesoTotalKg);
         double fatorPeso = 1.0 + (peso / KG_POR_FATOR_DE_PESO);
         double fatorRisco = 1.0 + (perigoMedio * ACRESCIMO_FRETE_POR_PERIGO);
-        return Math.round(distanciaTotalKm * TAXA_BASE_FRETE_LATAO_POR_KM * fatorPeso * fatorRisco);
+        return Math.round(distanciaTotalKm * TAXA_BASE_FRETE_LATAO_POR_KM * fatorPeso * fatorRisco * servico.getFatorFrete());
     }
 
     /**
@@ -206,7 +214,12 @@ public class RotaComercial {
      *         for nula ou não tiver saldo (nada é debitado)
      */
     public boolean pagarFrete(Carteira carteira, double pesoTotalKg) {
-        return carteira != null && carteira.pagarLatao(calcularCustoFreteEmLatao(pesoTotalKg));
+        return pagarFrete(carteira, pesoTotalKg, ServicoTransporte.COMUM);
+    }
+
+    /** Cobra o frete do serviço escolhido; {@code false} (nada debitado) se faltar saldo. */
+    public boolean pagarFrete(Carteira carteira, double pesoTotalKg, ServicoTransporte servico) {
+        return carteira != null && carteira.pagarLatao(calcularCustoFreteEmLatao(pesoTotalKg, servico));
     }
 
     /**
@@ -228,7 +241,39 @@ public class RotaComercial {
      *         algum trecho tiver perigo {@code >= 6}; {@code false} caso contrário
      */
     public boolean recomendaEscolta() {
-        return perigoMedio >= LIMITE_PERIGO_MEDIO_ESCOLTA || perigoMaximo >= LIMITE_PERIGO_MAXIMO_ESCOLTA;
+        return recomendaEscolta(ServicoTransporte.COMUM);
+    }
+
+    /**
+     * Escolta recomendada para o serviço escolhido: os limites valem sobre o perigo
+     * já multiplicado pelo fator de risco do serviço (um comboio blindado dispensa
+     * escolta onde um expresso precisaria dela).
+     */
+    public boolean recomendaEscolta(ServicoTransporte servico) {
+        double f = servico.getFatorRisco();
+        return perigoMedio * f >= LIMITE_PERIGO_MEDIO_ESCOLTA || perigoMaximo * f >= LIMITE_PERIGO_MAXIMO_ESCOLTA;
+    }
+
+    /** Horas de viagem da origem ao destino com o serviço escolhido. */
+    public double horasDeViagem(ServicoTransporte servico) {
+        double horas = 0;
+        for (Conexao a : arestas) horas += a.getDistanciaKm() / servico.velocidadeKmH(a);
+        return horas;
+    }
+
+    /**
+     * Chance (0 a 1) de a carga ser atacada em algum ponto da viagem, com o mesmo
+     * cálculo hora a hora de {@link Caravana#avancarHoras}.
+     *
+     * @param fatorProtecao multiplicador do risco pela escolta (1 = desprotegida)
+     */
+    public double chanceDeAtaque(ServicoTransporte servico, double fatorProtecao) {
+        double chanceIntacta = 1.0;
+        for (Conexao a : arestas) {
+            double riscoHora = Math.min(1.0, servico.riscoPorHora(a) * fatorProtecao);
+            chanceIntacta *= Math.pow(1.0 - riscoHora, a.getDistanciaKm() / servico.velocidadeKmH(a));
+        }
+        return 1.0 - chanceIntacta;
     }
 
     /**

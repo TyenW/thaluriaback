@@ -108,7 +108,7 @@ flowchart TD
 
     subgraph Logistica Global ["3. Transporte e Arbitragem Territorial"]
         Dijkstra["Navegador Dijkstra (Menor Custo Risco/Distância)"]
-        Caravanas["Caravanas Físicas (6 km/h terra | 14 km/h mar)"]
+        Caravanas["Caravanas Físicas (4 a 10 km/h conforme o serviço de transporte)"]
         Missoes["Quadro de Missões (Escolta 100% ou Resgate de Carga)"]
     end
 

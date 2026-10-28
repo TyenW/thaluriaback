@@ -32,7 +32,8 @@ import teste.TesteEndToEnd;
  *    - Desvio dinâmico de conexões bloqueadas ou de perigo extremo.
  * 
  * 5. CARAVANAS E COMÉRCIO INTERMUNICIPAL:
- *    - Deslocamento físico hora a hora (6 km/h em terra, 14 km/h no mar).
+ *    - Deslocamento físico hora a hora, na velocidade do serviço de transporte
+ *      (Comum 6 km/h, Expresso 10, Comboio Blindado 4, Guarda Real 9); rotas marítimas bloqueadas.
  *    - Desconto de rede de 25% entre lojas da mesma aliança mercantil.
  *    - Modos de proteção: Desprotegida, Escolta NPC (-75% risco) e Escolta Jogador (100% segura).
  * 

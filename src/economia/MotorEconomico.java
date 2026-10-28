@@ -32,6 +32,15 @@ public class MotorEconomico {
 
     /** Custo entregue (mercadoria + frete + escolta) máximo, como fração do valor de revenda local. */
     private static final double MARGEM_MAXIMA_CUSTO_ENCOMENDA = 0.80;
+    /** Custo de esperar a carga, por hora, como fração do valor de revenda (dinheiro parado). */
+    private static final double CUSTO_HORA_ESPERA = 0.002;
+    /** Idem quando a prateleira está vazia: cada hora de espera é venda perdida. */
+    private static final double CUSTO_HORA_ESPERA_SEM_ESTOQUE = 0.01;
+    /**
+     * Risco esperado quando a rota pede escolta: 60% de chance de achar mercenários NPCs (-75%)
+     * se nenhum jogador aceitar, senão viaja desprotegida (0,6 × 0,25 + 0,4 × 1).
+     */
+    private static final double FATOR_RISCO_COM_ESCOLTA_RECOMENDADA = 0.55;
 
     // Receitas cadastradas pelo Mestre e catálogo de itens (carregados do banco)
     private List<ReceitaLoja> receitas = new ArrayList<>();
@@ -157,9 +166,15 @@ public class MotorEconomico {
     }
 
     /**
-     * Localiza a melhor fornecedora no grafo (menor custo de mercadoria + frete),
+     * Localiza a melhor combinação de fornecedora e serviço de transporte no grafo,
      * desconta benefício de rede de lojas se aplicável, deduz do caixa da compradora
      * e expede a caravana comercial com suporte a escoltas.
+     *
+     * <p>O mercador escolhe pelo menor custo efetivo: o que sai do caixa (mercadoria,
+     * frete do serviço e escolta) mais a perda esperada (valor de revenda × chance de
+     * ataque) mais o custo da espera (horas de viagem × valor de revenda × taxa).
+     * Rotas perigosas e cargas valiosas puxam para serviços seguros; prateleira vazia
+     * puxa para os rápidos.
      */
     public boolean solicitarCompraEntreCidades(Lojas compradora, Item itemDesejado, int qtd) {
         Cidade destino = compradora.getCidadeSede();
@@ -170,10 +185,19 @@ public class MotorEconomico {
 
         Lojas melhorFornecedora = null;
         RotaComercial melhorRota = null;
-        long menorCustoTotalLatao = Long.MAX_VALUE;
+        ServicoTransporte melhorServico = null;
+        double menorCustoEfetivo = Double.MAX_VALUE;
         long custoMercadoriaEscolhidaLatao = 0;
 
         double pesoTotalCarga = itemDesejado.getPeso() * qtd;
+        long caixaDisponivel = compradora.caixaDisponivelParaCompras();
+
+        // Mercador racional: só encomenda se a mercadoria chega custando bem menos do que vende na própria loja.
+        // Sem isso, frete e escolta consumiam mais do que todo o caixa do mundo em poucas semanas.
+        long valorDeRevendaLocal = compradora.calcularPrecoDinamicoVendaEmLatao(itemDesejado) * qtd;
+        long custoMaximoAceito = Math.round(valorDeRevendaLocal * MARGEM_MAXIMA_CUSTO_ENCOMENDA);
+        double custoPorHoraDeEspera = valorDeRevendaLocal * (compradora.getQuantidadeEstoque(itemDesejado.getId()) == 0
+                ? CUSTO_HORA_ESPERA_SEM_ESTOQUE : CUSTO_HORA_ESPERA);
 
         for (Cidade outraCidade : cidades) {
             if (outraCidade.equals(destino)) continue;
@@ -201,32 +225,29 @@ public class MotorEconomico {
                 }
 
                 long custoProdutos = precoUnitarioLatao * qtd;
-                long custoFrete = rota.calcularCustoFreteEmLatao(pesoTotalCarga);
-                long custoTotal = custoProdutos + custoFrete;
 
-                if (custoTotal < menorCustoTotalLatao) {
-                    menorCustoTotalLatao = custoTotal;
-                    melhorFornecedora = fornecedora;
-                    melhorRota = rota;
-                    custoMercadoriaEscolhidaLatao = custoProdutos;
+                for (ServicoTransporte servico : ServicoTransporte.values()) {
+                    boolean escolta = rota.recomendaEscolta(servico);
+                    // Mercadoria + frete (+ escolta caso recomendada): precisa caber no caixa e na margem
+                    long custoCaixa = custoProdutos + rota.calcularCustoFreteEmLatao(pesoTotalCarga, servico)
+                            + (escolta ? rota.calcularCustoEscoltaEmLatao() : 0L);
+                    if (custoCaixa > caixaDisponivel || custoCaixa > custoMaximoAceito) continue;
+
+                    double chanceAtaque = rota.chanceDeAtaque(servico, escolta ? FATOR_RISCO_COM_ESCOLTA_RECOMENDADA : 1.0);
+                    double custoEfetivo = custoCaixa + chanceAtaque * valorDeRevendaLocal
+                            + rota.horasDeViagem(servico) * custoPorHoraDeEspera;
+                    if (custoEfetivo < menorCustoEfetivo) {
+                        menorCustoEfetivo = custoEfetivo;
+                        melhorFornecedora = fornecedora;
+                        melhorRota = rota;
+                        melhorServico = servico;
+                        custoMercadoriaEscolhidaLatao = custoProdutos;
+                    }
                 }
             }
         }
 
         if (melhorFornecedora == null || melhorRota == null) return false;
-
-        // Verifica se a loja compradora tem saldo em latão para mercadoria + frete (+ escolta caso recomendada)
-        long custoEscoltaEstimado = melhorRota.recomendaEscolta() ? melhorRota.calcularCustoEscoltaEmLatao() : 0L;
-        if (compradora.caixaDisponivelParaCompras() < menorCustoTotalLatao + custoEscoltaEstimado) {
-            return false;
-        }
-
-        // Mercador racional: só encomenda se a mercadoria chega custando bem menos do que vende na própria loja.
-        // Sem isso, frete e escolta consumiam mais do que todo o caixa do mundo em poucas semanas.
-        long valorDeRevendaLocal = compradora.calcularPrecoDinamicoVendaEmLatao(itemDesejado) * qtd;
-        if (menorCustoTotalLatao + custoEscoltaEstimado > Math.round(valorDeRevendaLocal * MARGEM_MAXIMA_CUSTO_ENCOMENDA)) {
-            return false;
-        }
 
         // 1. Pagamento das mercadorias à fornecedora
         compradora.getCaixa().pagarLatao(custoMercadoriaEscolhidaLatao);
@@ -234,8 +255,8 @@ public class MotorEconomico {
         melhorFornecedora.removerUnidades(itemDesejado.getId(), qtd);
 
         // 2. Pagamento do frete
-        long freteLatao = melhorRota.calcularCustoFreteEmLatao(pesoTotalCarga);
-        melhorRota.pagarFrete(compradora.getCaixa(), pesoTotalCarga);
+        long freteLatao = melhorRota.calcularCustoFreteEmLatao(pesoTotalCarga, melhorServico);
+        melhorRota.pagarFrete(compradora.getCaixa(), pesoTotalCarga, melhorServico);
 
         melhorFornecedora.registrarMovimentacao(diaAtual, horaAtual,
                 RegistroMovimentacao.TipoOperacao.VENDA_INTERMUNICIPAL,
@@ -249,14 +270,14 @@ public class MotorEconomico {
         compradora.registrarMovimentacao(diaAtual, horaAtual,
                 RegistroMovimentacao.TipoOperacao.DESPESA_FRETE,
                 itemDesejado.getNome(), qtd, freteLatao,
-                "Frete da encomenda");
+                "Frete da encomenda (" + melhorServico.getDescricao() + ")");
 
         Item loteCarga = Lojas.clonarItem(itemDesejado, qtd);
-        Caravana caravana = new Caravana(melhorFornecedora, compradora, loteCarga, melhorRota, diaAtual, horaAtual);
+        Caravana caravana = new Caravana(melhorFornecedora, compradora, loteCarga, melhorRota, melhorServico, diaAtual, horaAtual);
         caravanas.add(caravana);
 
-        // 3. Recomendação de escolta com base no risco da rota
-        if (melhorRota.recomendaEscolta()) {
+        // 3. Recomendação de escolta com base no risco da rota para o serviço contratado
+        if (melhorRota.recomendaEscolta(melhorServico)) {
             long recompensaEscolta = melhorRota.calcularCustoEscoltaEmLatao();
             missoes.add(new MissaoComercial(
                     MissaoComercial.TipoMissao.ESCOLTA,

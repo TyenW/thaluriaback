@@ -264,19 +264,23 @@ public class AdminCrud {
         cidades.colunaTitulo = "nome";
         cidades.afetaMundo = true;
         cidades.descricao = "Cidades do mundo e sua posição no mapa.";
+        cidades.grupo("Identidade");
         cidades.campo("nome", "Nome", TipoCampo.TEXTO).obrigatorio().lista();
         cidades.enumCampo("tipo", "Assentamento", Cidade.TipoAssentamento.values()).obrigatorio().padrao("CIDADE").lista();
         cidades.opcoesCampo("reino", "Reino", "frosthelm", "sylvanor", "aurelia", "drakos", "valthera", "campos", "ilhas").lista();
         cidades.opcoesCampo("icone_mapa", "Ícone no mapa", "capital", "cidade", "vila", "porto", "fortaleza").padrao("cidade");
+        cidades.campo("descricao", "Descrição", TipoCampo.TEXTO_LONGO).ajuda("Aparece na ficha da cidade no mapa quando ela é revelada aos jogadores.");
+        cidades.grupo("Posição no mapa");
         cidades.campo("mapa_x", "Posição X no mapa", TipoCampo.REAL).faixa(0, 1536).ajuda("Clique no mapa para posicionar.");
         cidades.campo("mapa_y", "Posição Y no mapa", TipoCampo.REAL).faixa(0, 1024);
         cidades.campo("tem_porto", "Possui porto", TipoCampo.BOOLEANO).padrao(false).lista().ajuda("Necessário para rotas marítimas.");
+        cidades.grupo("Ambiente");
         cidades.enumCampo("regiao", "Clima / região", Regiao.values()).obrigatorio().padrao("TEMPERADO");
         cidades.enumCampo("geologia", "Geologia", Geologia.values()).obrigatorio().padrao("PLANICIE");
         cidades.enumCampo("aquifero", "Aquífero", Aquifero.values()).obrigatorio().padrao("RIO");
+        cidades.grupo("Fronteira");
         cidades.campo("e_fronteira", "Cidade de fronteira", TipoCampo.BOOLEANO).padrao(false);
-        cidades.enumCampo("regiao_fronteira", "Região de fronteira", Regiao.values());
-        cidades.campo("descricao", "Descrição", TipoCampo.TEXTO_LONGO);
+        cidades.enumCampo("regiao_fronteira", "Região de fronteira", Regiao.values()).visivelSe("e_fronteira");
 
         // ---------------- Rotas ----------------
         Entidade rotas = nova("rotas", "Rotas", "conexoes", "id");
@@ -286,7 +290,7 @@ public class AdminCrud {
         rotas.ref("origem_id", "Origem", "cidades").obrigatorio().lista();
         rotas.ref("destino_id", "Destino", "cidades").obrigatorio().lista();
         rotas.enumCampo("tipo_rota", "Tipo", Conexao.TipoDeRota.values()).obrigatorio().padrao("TERRESTRE").lista()
-                .ajuda("Rotas marítimas exigem porto nas duas cidades.");
+                .ajuda("Rotas marítimas exigem porto nas duas cidades e nascem bloqueadas (navegação fora de uso).");
         rotas.campo("distancia_km", "Distância (km)", TipoCampo.INTEIRO).obrigatorio().faixa(1, 100000).padrao(100).lista();
         rotas.campo("perigo", "Perigo (1–10)", TipoCampo.INTEIRO).obrigatorio().faixa(1, 10).padrao(3).lista();
         rotas.campo("bloqueada", "Bloqueada", TipoCampo.BOOLEANO).padrao(false).lista();
@@ -561,6 +565,9 @@ public class AdminCrud {
                 if ("MARITIMA".equals(v.get("tipo_rota"))) {
                     long portos = lerLong(conn, "SELECT COUNT(*) FROM cidades WHERE tem_porto = 1 AND id IN (?, ?)", o, d);
                     if (portos < 2) throw new ErroValidacao("Rotas marítimas exigem porto nas duas cidades.");
+                    // Navegação fora de uso: rota que passa a ser marítima nasce bloqueada (o Mestre pode liberar depois)
+                    String tipoAnterior = edicao ? lerTexto(conn, "SELECT tipo_rota FROM conexoes WHERE id = ?", id) : null;
+                    if (!"MARITIMA".equals(tipoAnterior)) v.put("bloqueada", true);
                 }
                 long repetidas = lerLong(conn, "SELECT COUNT(*) FROM conexoes WHERE tipo_rota = ? AND id <> ? AND "
                         + "((origem_id = ? AND destino_id = ?) OR (origem_id = ? AND destino_id = ?))",
@@ -762,6 +769,17 @@ public class AdminCrud {
                             "SELECT c.id, c.nome, CASE WHEN c.geologia = m.geologia_nativa THEN 'mesma região e geologia' ELSE 'mesma região' END"
                                     + " FROM monstros_catalogo m JOIN cidades c ON c.regiao = m.regiao_nativa WHERE m.id = ?"
                                     + " ORDER BY (c.geologia = m.geologia_nativa) DESC, c.nome", id));
+                }
+                case "cidades" -> {
+                    grupos.add(grupo(conn, "Lojas", "lojas", "Nenhuma loja nesta cidade.",
+                            "SELECT id, nome, mercador FROM lojas WHERE cidade_id = ? ORDER BY nome", id));
+                    grupos.add(grupo(conn, "Rotas", "rotas", "Nenhuma rota sai daqui.",
+                            "SELECT r.id, c.nome, CASE r.tipo_rota WHEN 'MARITIMA' THEN 'mar' ELSE 'terra' END || ' · ' || r.distancia_km || ' km'"
+                                    + " FROM conexoes r JOIN cidades c ON c.id = CASE WHEN r.origem_id = ?1 THEN r.destino_id ELSE r.origem_id END"
+                                    + " WHERE r.origem_id = ?1 OR r.destino_id = ?1 ORDER BY r.distancia_km", id));
+                    grupos.add(grupo(conn, "Coletado nos arredores", "itens", "Nenhum item de coleta restrito a esta cidade.",
+                            "SELECT i.id, i.nome, CAST(ROUND(l.probabilidade * 100) AS INTEGER) || '%' FROM item_locais_coleta l"
+                                    + " JOIN itens i ON i.id = l.item_id WHERE l.cidade_id = ? ORDER BY i.nome", id));
                 }
                 default -> throw new ErroValidacao("Ligações não disponíveis para " + entidade + ".");
             }

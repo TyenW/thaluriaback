@@ -254,10 +254,21 @@ A classe [`Caravana`](../../src/economia/Caravana.java) modela a expedição fí
 * `ENTREGUE`: Carga descarregada com sucesso no armazém da loja de destino.
 * `PERDIDA_DEFINITIVAMENTE`: Missão de resgate fracassou e a carga foi consumida ou pilhada.
 
-### 8.2. Cinemática e Velocidade
+### 8.2. Cinemática, Velocidade e Serviços de Transporte (`ServicoTransporte`)
 
-* **Rotas Terrestres:** Velocidade de **6,0 km/h**.
-* **Rotas Marítimas:** Velocidade de **14,0 km/h** (exigem portos ativos em ambas as cidades).
+A velocidade não é fixa: cada encomenda é levada por um **serviço de transporte**, que troca velocidade e segurança por preço de frete.
+
+| Serviço | Velocidade em terra | Risco de ataque por hora | Frete |
+|---|:---:|:---:|:---:|
+| **`COMUM`** (Caravana Comum) | 6 km/h | ×1,0 | ×1,0 |
+| **`EXPRESSO`** (Expresso de Batedores): rápido, pouco seguro | 10 km/h | ×1,6 | ×1,3 |
+| **`COMBOIO_BLINDADO`**: seguro, lento | 4 km/h | ×0,35 | ×1,4 |
+| **`GUARDA_REAL`**: rápido e seguro | 9 km/h | ×0,35 | ×2,2 |
+
+* O risco por hora de um trecho é `perigo × 0,012 × fator do serviço` (× 0,25 com escolta de NPCs). Como o ataque é sorteado por hora de estrada, um serviço mais rápido também fica menos tempo exposto.
+* A **escolta** é recomendada sobre o perigo já multiplicado pelo fator do serviço: Blindado e Guarda Real praticamente nunca abrem missão de escolta; o Expresso abre com mais frequência.
+* **Escolha pela IA do lojista:** para cada fornecedora e serviço que cabem no caixa e na margem de 80% da revenda, o mercador calcula o **custo efetivo** = mercadoria + frete + escolta + perda esperada (valor de revenda × chance de ataque na viagem) + custo da espera (horas × valor de revenda × 0,2%/h, ou 1%/h se a prateleira do item estiver vazia). Vence o menor. Na prática: carga valiosa em estrada perigosa vai pela Guarda Real, carga pesada e barata pela Comum, prateleira vazia puxa para os rápidos.
+* **Rotas Marítimas:** **bloqueadas** (a navegação está fora de uso na campanha). Continuam cadastradas; uma rota marítima nova ou convertida nasce bloqueada, e o Mestre pode desbloquear uma pelo painel. Se usadas, o navio anda a 14 km/h, qualquer que seja o serviço.
 
 ### 8.3. Segurança e Níveis de Proteção (`TipoProtecao`)
 

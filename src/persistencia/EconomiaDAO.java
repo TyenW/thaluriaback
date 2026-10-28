@@ -555,6 +555,22 @@ public class EconomiaDAO {
             popularRotasMaritimasExtras();
             BancoDados.marcarSemente("rotas_maritimas_v2");
         }
+        if (!BancoDados.sementeAplicada("rotas_maritimas_bloqueadas_v1")) {
+            bloquearRotasMaritimas();
+            BancoDados.marcarSemente("rotas_maritimas_bloqueadas_v1");
+        }
+    }
+
+    /**
+     * A navegação está fora de uso na campanha: bloqueia todas as rotas marítimas (uma vez por banco).
+     * As rotas continuam cadastradas; o Mestre pode desbloquear alguma pelo painel.
+     */
+    private void bloquearRotasMaritimas() {
+        try (Connection conn = BancoDados.getConnection(); Statement st = conn.createStatement()) {
+            st.executeUpdate("UPDATE conexoes SET bloqueada = 1 WHERE tipo_rota = 'MARITIMA'");
+        } catch (SQLException e) {
+            throw new RuntimeException("Erro ao bloquear rotas marítimas", e);
+        }
     }
 
     /** Completa a malha de navegação costeira entre os portos do continente e das ilhas. */

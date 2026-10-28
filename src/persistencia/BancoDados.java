@@ -392,6 +392,7 @@ public class BancoDados {
                 quantidade INTEGER NOT NULL,
                 caminho_cidades TEXT NOT NULL,
                 tipos_trechos TEXT NOT NULL,
+                servico TEXT NOT NULL DEFAULT 'COMUM',
                 indice_trecho INTEGER NOT NULL DEFAULT 0,
                 km_no_trecho REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
@@ -685,6 +686,8 @@ public class BancoDados {
                 "ALTER TABLE lojas ADD COLUMN nivel INTEGER NOT NULL DEFAULT 3",
                 "ALTER TABLE receitas ADD COLUMN tipo_loja TEXT",
                 "ALTER TABLE livro_caixa_movimentacoes ADD COLUMN saldo_apos_latao INTEGER",
+                // Caravanas: serviço de transporte contratado (velocidade, risco e frete)
+                "ALTER TABLE caravanas_ativas ADD COLUMN servico TEXT NOT NULL DEFAULT 'COMUM'",
                 // Origem dos itens: coletável e drop ligado ao catálogo (antes era só o nome)
                 "ALTER TABLE itens ADD COLUMN coletavel INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE monstro_drops ADD COLUMN item_id INTEGER REFERENCES itens(id)",
