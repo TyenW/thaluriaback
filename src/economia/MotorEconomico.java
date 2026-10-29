@@ -19,13 +19,18 @@ public class MotorEconomico {
     private final List<MissaoComercial> missoes = new ArrayList<>();
     private final Random random;
 
+    /** Relógio do mundo (mercado): nunca anda para trás e fica igual ou à frente da mesa ativa mais adiantada. */
     private int diaAtual = 1;
     private int horaAtual = 8;
     /**
-     * Dia da campanha, que só anda com dias jogados. A disseminação de conhecimento segue este relógio:
-     * simular o mercado (aquecer lojas no início da campanha) não espalha rumores entre cidades.
+     * Mesas de jogo, cada uma com o seu relógio (docs/Sistema de Economia/05). O dia da campanha do motor
+     * é o da mesa ativa mais à frente: simular o mercado (aquecer) não move mesa nenhuma, então não espalha rumores.
      */
+    private final Map<Integer, Mesa> mesas = new LinkedHashMap<>();
+    /** Dia da campanha usado só quando não há mesa ativa (testes e mundos sem mesas). */
     private int diaCampanha = 1;
+    /** Chamado no fim de cada ciclo diário: o servidor grava a foto do mercado do dia (mercado_snapshot). */
+    private java.util.function.ObjIntConsumer<MotorEconomico> aoFecharDia;
 
     /** Rotas já calculadas no ciclo atual (RotaComercial é imutável); limpo a cada dia, pois o perigo muda. */
     private final Map<String, Optional<RotaComercial>> rotasDoDia = new HashMap<>();
@@ -70,20 +75,12 @@ public class MotorEconomico {
      * prazos de missões e deslocamentos físicos de caravanas.
      */
     public void avancarTempo(int horas) {
-        avancarTempo(horas, true);
-    }
-
-    /**
-     * @param passaCampanha false = só o mercado trabalha (vendas, produção, encomendas, caravanas);
-     *                      o dia da campanha e a disseminação de conhecimento ficam parados.
-     */
-    public void avancarTempo(int horas, boolean passaCampanha) {
         for (int i = 0; i < horas; i++) {
             horaAtual++;
             if (horaAtual >= 24) {
                 horaAtual = 0;
                 diaAtual++;
-                if (passaCampanha) diaCampanha++;
+                if (mesas.isEmpty()) diaCampanha++;
                 executarCicloDiario();
             }
             processarMissoesPendentes(1);
@@ -99,6 +96,7 @@ public class MotorEconomico {
     public void executarCicloDiario() {
         rotasDoDia.clear();
         limparCaravanasConcluidas();
+        int diaCampanha = getDiaCampanha();
         for (Cidade cidade : cidades) {
             // Receitas regionais só saem das cidades que já chegaram à Produção (as comuns valem em todo lugar)
             List<ReceitaLoja> receitasDaCidade = receitas.stream()
@@ -163,6 +161,9 @@ public class MotorEconomico {
                 cidade.getGuildaRegional().processarDiaRequisicoes(diaAtual, horaAtual, random);
             }
         }
+
+        // 8. Foto do mercado do dia, lida pelas mesas que ficarem para trás
+        if (aoFecharDia != null) aoFecharDia.accept(this, diaAtual);
     }
 
     /**
@@ -180,7 +181,7 @@ public class MotorEconomico {
         Cidade destino = compradora.getCidadeSede();
         if (destino == null || itemDesejado == null || qtd <= 0) return false;
         // Item regional só viaja para cidades que pelo menos ouviram falar dele
-        RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(itemDesejado.getId(), destino.getId(), diaCampanha);
+        RedeConhecimento.Estagio estagio = redeConhecimento.estagioDoItem(itemDesejado.getId(), destino.getId(), getDiaCampanha());
         if (estagio != null && !estagio.peloMenos(RedeConhecimento.Estagio.RUMOR)) return false;
 
         Lojas melhorFornecedora = null;
@@ -537,8 +538,94 @@ public class MotorEconomico {
     public int getHoraAtual() { return horaAtual; }
     public void setDiaAtual(int diaAtual) { this.diaAtual = diaAtual; }
 
-    public int getDiaCampanha() { return diaCampanha; }
+    public void setHoraAtual(int horaAtual) { this.horaAtual = horaAtual; }
+
+    /** Momento do mundo em horas corridas (mesma escala de {@link Mesa#momento()}). */
+    public int momento() { return Mesa.momento(diaAtual, horaAtual); }
+
+    // ------------------------------------------------------------------
+    // Mesas e linhas do tempo (docs/Sistema de Economia/05)
+    // ------------------------------------------------------------------
+
+    /** Dia da campanha do motor: o da mesa ativa mais à frente (sem mesa ativa, o dia guardado). */
+    public int getDiaCampanha() {
+        int maior = 0;
+        for (Mesa m : mesas.values()) if (m.isAtiva()) maior = Math.max(maior, m.getDia());
+        return maior > 0 ? maior : diaCampanha;
+    }
 
     public void setDiaCampanha(int diaCampanha) { this.diaCampanha = diaCampanha; }
-    public void setHoraAtual(int horaAtual) { this.horaAtual = horaAtual; }
+
+    /** Dia da mesa ativa mais atrasada (sem mesa ativa, o do mundo): daí para trás os snapshots podem ser apagados. */
+    public int getDiaMesaMaisAtrasada() {
+        int menor = Integer.MAX_VALUE;
+        for (Mesa m : mesas.values()) if (m.isAtiva()) menor = Math.min(menor, m.getDia());
+        return menor == Integer.MAX_VALUE ? diaAtual : menor;
+    }
+
+    public void definirMesas(Collection<Mesa> lista) {
+        mesas.clear();
+        for (Mesa m : lista) mesas.put(m.getId(), m);
+    }
+
+    public void registrarMesa(Mesa m) { if (m != null) mesas.put(m.getId(), m); }
+    public Mesa getMesa(int id) { return mesas.get(id); }
+    public Collection<Mesa> getMesas() { return Collections.unmodifiableCollection(mesas.values()); }
+
+    public void setAoFecharDia(java.util.function.ObjIntConsumer<MotorEconomico> aoFecharDia) { this.aoFecharDia = aoFecharDia; }
+    public java.util.function.ObjIntConsumer<MotorEconomico> getAoFecharDia() { return aoFecharDia; }
+
+    /** A mesa está num dia anterior ao do mundo: lê o snapshot do dia dela e não mexe em caravanas. */
+    public boolean mesaNoPassado(Mesa m) {
+        return m != null && m.getDia() < diaAtual;
+    }
+
+    /**
+     * Anda o relógio de uma mesa. Se ela passar o mundo, o motor simula só a diferença
+     * (o mundo segue a mesa mais à frente). Mesa arquivada não puxa o mundo.
+     *
+     * @return horas que o mundo andou
+     */
+    public int avancarMesa(Mesa mesa, int horas) {
+        mesa.avancar(horas);
+        int diferenca = mesa.momento() - momento();
+        if (!mesa.isAtiva() || diferenca <= 0) return 0;
+        avancarTempo(diferenca);
+        return diferenca;
+    }
+
+    /** Encomenda de mesa entregue: o resultado vai à ficha (fichaId) ou já entrou no balcão da loja (fichaId nulo). */
+    public record EntregaEncomenda(Lojas loja, Mesa mesa, Long fichaId, Item item) {}
+
+    /**
+     * Entrega as encomendas cujas mesas chegaram ao prazo. A loja pode ainda não ter terminado
+     * (mesa atrasada): no passado, a peça já estava pronta. Quem chama leva os itens às fichas.
+     */
+    public List<EntregaEncomenda> entregarEncomendasVencidas() {
+        List<EntregaEncomenda> entregas = new ArrayList<>();
+        for (Cidade c : cidades) {
+            for (Lojas l : c.getLojas()) {
+                for (OrdemReceita o : new ArrayList<>(l.getOrdensReceita())) {
+                    if (!o.isDaMesa()) continue;
+                    Mesa m = mesas.get(o.getMesaId());
+                    if (m == null || o.getDiaConclusaoMesa() == null || m.getDia() < o.getDiaConclusaoMesa()) continue;
+                    Item item = l.entregarEncomenda(o, diaAtual, horaAtual, receitasPorId, catalogoItens,
+                            "[Mesa " + m.getNome() + " · dia " + o.getDiaConclusaoMesa() + "]");
+                    if (item != null) entregas.add(new EntregaEncomenda(l, m, o.getFichaId(), item));
+                }
+            }
+        }
+        return entregas;
+    }
+
+    /** O personagem trocou de mesa: as encomendas dele passam a seguir o relógio da nova. */
+    public void moverEncomendasDaFicha(long fichaId, int novaMesaId) {
+        for (Cidade c : cidades) {
+            for (Lojas l : c.getLojas()) {
+                for (OrdemReceita o : l.getOrdensReceita()) {
+                    if (o.getFichaId() != null && o.getFichaId() == fichaId) o.moverParaMesa(novaMesaId);
+                }
+            }
+        }
+    }
 }

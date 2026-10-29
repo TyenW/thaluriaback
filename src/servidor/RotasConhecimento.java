@@ -1,5 +1,6 @@
 package servidor;
 
+import economia.Mesa;
 import economia.MotorEconomico;
 import economia.ReceitaLoja;
 import economia.RedeConhecimento;
@@ -37,7 +38,7 @@ class RotasConhecimento {
     }
 
     void registrar() {
-        rota("/api/mestre/conhecimentos", p -> painel(), false);
+        rota("/api/mestre/conhecimentos", this::painel, false);
         rota("/api/mestre/conhecimentos/conceder", p -> {
             TipoConhecimento tipo = "TIPO_ARMA".equals(p.get("tipo")) ? TipoConhecimento.TIPO_ARMA : TipoConhecimento.RECEITA;
             int id = dao.conceder(tipo, inteiroOuNulo(p, "tipoArmaId"), inteiroOuNulo(p, "receitaId"), inteiro(p, "cidadeOrigemId"), dia(), parametros(p));
@@ -73,10 +74,12 @@ class RotasConhecimento {
         });
     }
 
-    private Map<String, Object> painel() {
+    /** Estágios no dia da mesa escolhida (mesaId); sem mesa, no dia da campanha (mesa mais à frente). */
+    private Map<String, Object> painel(Map<String, String> p) {
         MotorEconomico motor = servidor.getMotorEconomico();
         RedeConhecimento rede = motor.getRedeConhecimento();
-        int dia = motor.getDiaCampanha();
+        Mesa mesa = servidor.getRotasMesas().mesaDoPedido(p);
+        int dia = servidor.getRotasMesas().diaDaConsulta(mesa);
         ForjaDAO.Catalogo forja = forjaDAO.carregarCatalogo();
         Map<Integer, Map<String, Object>> dadosMapa = servidor.getEconomiaDAO().listarDadosMapa();
 
@@ -151,6 +154,7 @@ class RotasConhecimento {
         ConhecimentoDAO.Parametros padrao = ConhecimentoDAO.Parametros.PADRAO;
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("dia", dia);
+        r.put("relogio", servidor.getRotasMesas().relogio(mesa));
         r.put("conhecimentos", conhecimentos);
         r.put("cidades", cidades);
         r.put("tiposArma", tipos);
@@ -175,7 +179,7 @@ class RotasConhecimento {
         throw new AdminCrud.ErroValidacao("Conhecimento não encontrado. Atualize a página.");
     }
 
-    /** A disseminação anda com o dia da campanha, não com o do mercado (que pode ser simulado à frente). */
+    /** Concessões e pausas acontecem no dia da campanha (mesa ativa mais à frente), não no do mercado (que pode ser simulado à frente). */
     private int dia() {
         return servidor.getMotorEconomico().getDiaCampanha();
     }

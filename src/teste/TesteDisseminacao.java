@@ -176,7 +176,9 @@ public class TesteDisseminacao {
         motor2.setDiaAtual(10);
         motor2.executarCicloDiario();
         afirme(botica.getOrdensReceita().stream().noneMatch(o -> o.getReceitaId() == 9), "Sem Produção em Brumal, a IA da botica não fabrica a poção");
+        // A disseminação segue o dia da campanha (mesa ativa mais à frente), não o do mercado
         motor2.setDiaAtual(60);
+        motor2.registrarMesa(new Mesa(1, "Mesa", 60, 8, Mesa.Status.ATIVA, null));
         motor2.executarCicloDiario();
         afirme(botica.getOrdensReceita().stream().anyMatch(o -> o.getReceitaId() == 9), "Chegada a Produção (dia 43), a botica passa a fabricá-la");
     }

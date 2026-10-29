@@ -40,6 +40,7 @@ public class ServidorThaluriaAPI {
     private final RotasComercio rotasComercio = new RotasComercio(this);
     private final RotasForja rotasForja = new RotasForja(this, rotasComercio);
     private final RotasConhecimento rotasConhecimento = new RotasConhecimento(this);
+    private final RotasMesas rotasMesas = new RotasMesas(this);
     private final SessaoLoginDAO sessaoDAO = new SessaoLoginDAO();
 
     /** Rotas abertas a quem ainda não entrou. */
@@ -119,16 +120,18 @@ public class ServidorThaluriaAPI {
 
         this.server = HttpServer.create(new InetSocketAddress(porta), 0);
         this.server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-        // Dois relógios: a campanha (dias jogados, guia a disseminação) e o mercado, que pode estar à
-        // frente quando o Mestre simula dias sem jogá-los. O motor recomeçava no dia 1 a cada reinício.
+        // Relógio do mundo (mercado) e relógios das mesas. O dia da campanha passou a ser o da mesa ativa
+        // mais à frente (docs/Sistema de Economia/05); o valor salvo só serve para criar a mesa Principal.
         int diaCampanha = Math.max(1, controleMestre.getDiaAtualCampanha());
         this.motorEconomico.setDiaCampanha(diaCampanha);
         this.motorEconomico.setDiaAtual(Math.max(diaCampanha, inteiroSalvo("dia", diaCampanha)));
         this.motorEconomico.setHoraAtual(Math.max(0, Math.min(23, inteiroSalvo("hora", this.motorEconomico.getHoraAtual()))));
+        rotasMesas.iniciar(this.motorEconomico, diaCampanha);
         configurarRotas();
         rotasComercio.registrar();
         rotasForja.registrar();
         rotasConhecimento.registrar();
+        rotasMesas.registrar();
     }
 
     /**
@@ -564,7 +567,7 @@ public class ServidorThaluriaAPI {
 
             enviarJson(exchange, 200, String.format(
                 "{\"diaCampanha\":%d,\"diaMercado\":%d,\"capitulosWiki\":%s,\"cidades\":%s,\"rotas\":%s,\"bestiario\":%s}",
-                controleMestre.getDiaAtualCampanha(), motorEconomico.getDiaAtual(), wikiJson, cidadesJson, rotasJson, bestiarioJson
+                motorEconomico.getDiaCampanha(), motorEconomico.getDiaAtual(), wikiJson, cidadesJson, rotasJson, bestiarioJson
             ));
         });
 
@@ -575,25 +578,32 @@ public class ServidorThaluriaAPI {
             String acao = params.getOrDefault("acao", "");
 
             if ("AVANCAR_DIA".equalsIgnoreCase(acao) || "SIMULAR_MERCADO".equalsIgnoreCase(acao)) {
-                int dias;
-                try {
-                    dias = Integer.parseInt(params.getOrDefault("dias", "1").trim());
-                } catch (NumberFormatException e) {
-                    dias = 0;
-                }
                 // Limite evita travar o servidor simulando anos de mercado num clique
-                if (dias < 1 || dias > MAX_DIAS_POR_AVANCO) {
-                    enviarJson(exchange, 400, "{\"erro\":\"Informe de 1 a " + MAX_DIAS_POR_AVANCO + " dias.\"}");
+                int diaDaMesa;
+                try {
+                    int dias = RotasMesas.diasDoPedido(params);
+                    synchronized (this) {
+                        if ("SIMULAR_MERCADO".equalsIgnoreCase(acao)) {
+                            rotasMesas.simularMercado(dias);
+                            diaDaMesa = motorEconomico.getDiaCampanha();
+                        } else {
+                            // Dia jogado: anda uma mesa (a do pedido ou a única ativa) e, se ela passar o mundo, o mercado vai junto
+                            Mesa mesa = rotasMesas.mesaDoPedido(params);
+                            if (mesa == null) {
+                                List<Mesa> ativas = motorEconomico.getMesas().stream().filter(Mesa::isAtiva).toList();
+                                if (ativas.size() != 1) throw new AdminCrud.ErroValidacao("Escolha qual mesa avança.");
+                                mesa = ativas.get(0);
+                            }
+                            rotasMesas.avancarMesa(mesa, 24 * dias);
+                            diaDaMesa = mesa.getDia();
+                        }
+                    }
+                } catch (AdminCrud.ErroValidacao e) {
+                    enviarJson(exchange, 400, "{\"erro\":" + AdminCrud.json(e.getMessage()) + "}");
                     return;
                 }
-                boolean passaCampanha = "AVANCAR_DIA".equalsIgnoreCase(acao);
-                synchronized (this) {
-                    if (passaCampanha) controleMestre.avancarDiasDeMercado(dias, new Random());
-                    motorEconomico.avancarTempo(24 * dias, passaCampanha);
-                    motorEconomico.setDiaCampanha(controleMestre.getDiaAtualCampanha());
-                    economiaDAO.salvarEstadoCompleto(motorEconomico);
-                    salvarRelogioDoMercado();
-                }
+                enviarJson(exchange, 200, "{\"status\":\"OK\",\"diaAtual\":" + diaDaMesa + ",\"diaMercado\":" + motorEconomico.getDiaAtual() + "}");
+                return;
             } else if ("LIBERAR_WIKI".equalsIgnoreCase(acao)) {
                 controleMestre.liberarCapituloWiki(params.getOrDefault("capitulo", ""));
             } else if ("REVELAR_MONSTRO".equalsIgnoreCase(acao)) {
@@ -609,6 +619,7 @@ public class ServidorThaluriaAPI {
                     ControlePermissoesMestre.NivelVisibilidadeMapa.valueOf(params.getOrDefault("nivel", "ROTA_E_NOME_APENAS"))
                 );
             }
+            controleMestre.setDiaAtualCampanha(motorEconomico.getDiaCampanha());
             permissoesDAO.salvar(controleMestre);
             enviarJson(exchange, 200, "{\"status\":\"OK\",\"diaAtual\":" + controleMestre.getDiaAtualCampanha()
                     + ",\"diaMercado\":" + motorEconomico.getDiaAtual() + "}");
@@ -1265,6 +1276,8 @@ public class ServidorThaluriaAPI {
 
     EconomiaDAO getEconomiaDAO() { return economiaDAO; }
 
+    RotasMesas getRotasMesas() { return rotasMesas; }
+
     public int getPorta() {
         return server.getAddress().getPort();
     }
@@ -1570,10 +1583,15 @@ public class ServidorThaluriaAPI {
         }
     }
 
-    /** Relógio do mercado, guardado à parte do dia da campanha (podem divergir após simulações). */
-    private void salvarRelogioDoMercado() {
+    /**
+     * Relógio do mercado e dia da campanha (o da mesa ativa mais à frente, gravado para telas antigas
+     * e para o caso de o banco perder as mesas). As mesas guardam o próprio relógio em MesaDAO.
+     */
+    void salvarRelogios() {
         permissoesDAO.salvarValor("MERCADO", "dia", String.valueOf(motorEconomico.getDiaAtual()));
         permissoesDAO.salvarValor("MERCADO", "hora", String.valueOf(motorEconomico.getHoraAtual()));
+        controleMestre.setDiaAtualCampanha(motorEconomico.getDiaCampanha());
+        permissoesDAO.salvarValor("CAMPANHA", "dia_atual", String.valueOf(controleMestre.getDiaAtualCampanha()));
     }
 
     private int inteiroSalvo(String chave, int padrao) {
@@ -1592,6 +1610,8 @@ public class ServidorThaluriaAPI {
             novo.setDiaAtual(anterior.getDiaAtual());
             novo.setHoraAtual(anterior.getHoraAtual());
             novo.setDiaCampanha(anterior.getDiaCampanha());
+            novo.definirMesas(anterior.getMesas());
+            novo.setAoFecharDia(anterior.getAoFecharDia());
         }
         this.motorEconomico = novo;
     }

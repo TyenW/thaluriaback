@@ -633,6 +633,45 @@ public class BancoDados {
                 PRIMARY KEY (conhecimento_id, cidade_id),
                 FOREIGN KEY (conhecimento_id) REFERENCES conhecimentos(id) ON DELETE CASCADE
             );
+            """,
+            // Mesas de jogo, cada uma com o seu relógio (docs/Sistema de Economia/05)
+            """
+            CREATE TABLE IF NOT EXISTS mesas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                dia INTEGER NOT NULL DEFAULT 1,
+                hora INTEGER NOT NULL DEFAULT 8,
+                status TEXT NOT NULL DEFAULT 'ATIVA',
+                mestre_id INTEGER
+            );
+            """,
+            // Foto diária do mercado, lida pelas mesas atrasadas
+            """
+            CREATE TABLE IF NOT EXISTS mercado_snapshot (
+                dia INTEGER NOT NULL,
+                loja_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantidade INTEGER NOT NULL,
+                preco_venda_latao INTEGER NOT NULL,
+                preco_compra_latao INTEGER NOT NULL,
+                demanda INTEGER NOT NULL,
+                PRIMARY KEY (dia, loja_id, item_id)
+            );
+            """,
+            // Trocas de mesa dos personagens (as forçadas pelo Mestre ficam marcadas)
+            """
+            CREATE TABLE IF NOT EXISTS mesa_trocas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ficha_id INTEGER NOT NULL,
+                mesa_origem_id INTEGER,
+                mesa_destino_id INTEGER,
+                forcada INTEGER NOT NULL DEFAULT 0,
+                dia_personagem INTEGER,
+                hora_personagem INTEGER,
+                dia_mesa INTEGER,
+                hora_mesa INTEGER,
+                registrado_em TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             """
         };
 
@@ -699,7 +738,15 @@ public class BancoDados {
                 "ALTER TABLE receitas ADD COLUMN somente_encomenda INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE receitas ADD COLUMN chave_forja TEXT",
                 "ALTER TABLE loja_ordens_producao ADD COLUMN insumos_por_conta INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE loja_ordens_producao ADD COLUMN etapas TEXT"
+                "ALTER TABLE loja_ordens_producao ADD COLUMN etapas TEXT",
+                // Mesas: personagem em mesa (com relógio próprio) e encomendas com prazo no relógio da mesa
+                "ALTER TABLE fichas ADD COLUMN mesa_id INTEGER",
+                "ALTER TABLE fichas ADD COLUMN dia_personagem INTEGER",
+                "ALTER TABLE fichas ADD COLUMN hora_personagem INTEGER",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN mesa_id INTEGER",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN dia_conclusao_mesa INTEGER",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN ficha_id INTEGER",
+                "ALTER TABLE loja_ordens_producao ADD COLUMN pronta_aguardando INTEGER NOT NULL DEFAULT 0"
             };
             for (String colSql : colunasMigracao) {
                 try {

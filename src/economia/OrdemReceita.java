@@ -13,6 +13,10 @@ import java.util.StringJoiner;
  * Em receitas com etapas (armas da forja), cada componente fica pronto no seu dia e passa a
  * ocupar a prateleira <b>reservado</b> para esta encomenda: não pode ser vendido. Só volta a
  * ser estoque comum se a ordem for cancelada.
+ *
+ * Encomenda de jogador guarda a mesa e o prazo no relógio dela (docs/Sistema de Economia/05, seção 5.3):
+ * a loja produz no tempo do mundo, mas a entrega acontece quando a mesa chega ao dia combinado.
+ * Se a loja termina antes, o resultado fica reservado ({@link #isProntaAguardando()}).
  */
 public class OrdemReceita {
 
@@ -62,6 +66,14 @@ public class OrdemReceita {
     private final Origem origem;
     private final boolean insumosPorConta;
     private final List<EtapaOrdem> etapas = new ArrayList<>();
+    /** Mesa que encomendou (null = ordem do mundo: IA ou Mestre sem mesa). */
+    private Integer mesaId;
+    /** Prazo no relógio da mesa. */
+    private Integer diaConclusaoMesa;
+    /** Personagem que recebe o resultado (null = entra no estoque da loja para o Mestre vender). */
+    private Long fichaId;
+    /** A loja já terminou; o resultado espera a mesa chegar ao prazo. */
+    private boolean prontaAguardando;
 
     public OrdemReceita(int id, int receitaId, int lotes, int diaInicio, int diaConclusao, Origem origem) {
         this(id, receitaId, lotes, diaInicio, diaConclusao, origem, false, List.of());
@@ -80,6 +92,30 @@ public class OrdemReceita {
     }
 
     public boolean prontaNoDia(int dia) { return dia >= diaConclusao; }
+
+    /** Liga a ordem a uma mesa: o prazo do jogador é contado no relógio dela. */
+    public void vincularMesa(Integer mesaId, Integer diaConclusaoMesa, Long fichaId, boolean prontaAguardando) {
+        this.mesaId = mesaId;
+        this.diaConclusaoMesa = mesaId != null ? diaConclusaoMesa : null;
+        this.fichaId = fichaId;
+        this.prontaAguardando = mesaId != null && prontaAguardando;
+    }
+
+    /** Mesma ordem com outro dia de conclusão no mundo (o Mestre apressou a oficina). */
+    OrdemReceita comConclusao(int novoDia) {
+        OrdemReceita o = new OrdemReceita(id, receitaId, lotes, diaInicio, novoDia, origem, insumosPorConta, etapas);
+        o.vincularMesa(mesaId, diaConclusaoMesa, fichaId, prontaAguardando);
+        return o;
+    }
+
+    public boolean isDaMesa() { return mesaId != null; }
+    public Integer getMesaId() { return mesaId; }
+    public Integer getDiaConclusaoMesa() { return diaConclusaoMesa; }
+    public Long getFichaId() { return fichaId; }
+    public boolean isProntaAguardando() { return prontaAguardando; }
+    void marcarProntaAguardando() { prontaAguardando = true; }
+    /** O personagem trocou de mesa: a encomenda passa a seguir o relógio da nova. */
+    public void moverParaMesa(int novaMesaId) { if (mesaId != null) mesaId = novaMesaId; }
 
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }

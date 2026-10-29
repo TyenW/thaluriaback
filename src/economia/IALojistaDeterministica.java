@@ -140,7 +140,7 @@ public class IALojistaDeterministica {
     public static OrdemReceita decidirProducaoDoDia(Lojas loja, List<ReceitaLoja> receitas, Map<Integer, Item> catalogo,
                                                     int dia, int hora) {
         if (loja == null || receitas == null || receitas.isEmpty()) return null;
-        if (loja.getOrdensReceita().size() >= loja.getOrdensSimultaneasMax()) return null;
+        if (loja.getOrdensEmProducao() >= loja.getOrdensSimultaneasMax()) return null;
 
         AvaliacaoReceita melhorViavel = null;
         AvaliacaoReceita melhorTravada = null;

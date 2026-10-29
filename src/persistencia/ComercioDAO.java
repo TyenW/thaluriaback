@@ -53,15 +53,23 @@ public class ComercioDAO {
     }
 
     public void carregarOrdens(Connection conn, Lojas loja) throws SQLException {
-        String sql = "SELECT id, receita_id, lotes, dia_inicio, dia_conclusao, origem, insumos_por_conta, etapas FROM loja_ordens_producao WHERE loja_id = ? ORDER BY id";
+        String sql = """
+            SELECT id, receita_id, lotes, dia_inicio, dia_conclusao, origem, insumos_por_conta, etapas,
+                   mesa_id, dia_conclusao_mesa, ficha_id, pronta_aguardando
+            FROM loja_ordens_producao WHERE loja_id = ? ORDER BY id
+            """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, loja.getId());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     OrdemReceita.Origem origem = "MESTRE".equals(rs.getString("origem")) ? OrdemReceita.Origem.MESTRE : OrdemReceita.Origem.IA;
-                    loja.adicionarOrdemCarregada(new OrdemReceita(rs.getInt("id"), rs.getInt("receita_id"), rs.getInt("lotes"),
+                    OrdemReceita ordem = new OrdemReceita(rs.getInt("id"), rs.getInt("receita_id"), rs.getInt("lotes"),
                             rs.getInt("dia_inicio"), rs.getInt("dia_conclusao"), origem,
-                            rs.getInt("insumos_por_conta") == 1, OrdemReceita.lerEtapas(rs.getString("etapas"))));
+                            rs.getInt("insumos_por_conta") == 1, OrdemReceita.lerEtapas(rs.getString("etapas")));
+                    ordem.vincularMesa(rs.getObject("mesa_id") != null ? rs.getInt("mesa_id") : null,
+                            rs.getObject("dia_conclusao_mesa") != null ? rs.getInt("dia_conclusao_mesa") : null,
+                            rs.getObject("ficha_id") != null ? rs.getLong("ficha_id") : null, rs.getInt("pronta_aguardando") == 1);
+                    loja.adicionarOrdemCarregada(ordem);
                 }
             }
         }
@@ -74,7 +82,11 @@ public class ComercioDAO {
             del.executeUpdate();
         }
         if (loja.getOrdensReceita().isEmpty()) return;
-        String sql = "INSERT INTO loja_ordens_producao (loja_id, receita_id, lotes, dia_inicio, dia_conclusao, origem, insumos_por_conta, etapas) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = """
+            INSERT INTO loja_ordens_producao (loja_id, receita_id, lotes, dia_inicio, dia_conclusao, origem, insumos_por_conta, etapas,
+                mesa_id, dia_conclusao_mesa, ficha_id, pronta_aguardando)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (OrdemReceita o : loja.getOrdensReceita()) {
                 ps.setInt(1, loja.getId());
@@ -85,6 +97,10 @@ public class ComercioDAO {
                 ps.setString(6, o.getOrigem().name());
                 ps.setInt(7, o.isInsumosPorConta() ? 1 : 0);
                 ps.setString(8, o.getEtapas().isEmpty() ? null : o.etapasSerializadas());
+                ps.setObject(9, o.getMesaId());
+                ps.setObject(10, o.getDiaConclusaoMesa());
+                ps.setObject(11, o.getFichaId());
+                ps.setInt(12, o.isProntaAguardando() ? 1 : 0);
                 ps.addBatch();
             }
             ps.executeBatch();

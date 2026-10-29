@@ -291,6 +291,21 @@ public class Lojas {
         return true;
     }
 
+    /**
+     * Um aventureiro vende {@code qtd} unidades à loja por {@code totalLatao}, pago na hora.
+     * O item entra no estoque de agora (mesmo que a mesa dele esteja no passado).
+     *
+     * @return false se a loja não tem esse caixa
+     */
+    public boolean comprarDeAventureiro(Item modelo, int qtd, long totalLatao, int dia, int hora, String obs) {
+        if (modelo == null || qtd <= 0 || totalLatao < 0) return false;
+        if (totalLatao > 0 && !caixa.pagarLatao(totalLatao)) return false;
+        adicionarItem(clonarItem(modelo, qtd));
+        entradasRecentes.merge(modelo.getId(), qtd, Integer::sum);
+        registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.COMPRA_BALCAO, modelo.getNome(), qtd, totalLatao, obs);
+        return true;
+    }
+
     public void definirDemanda(Item item, int qtdDemanda) {
         if (item == null) return;
         catalogoConhecido.putIfAbsent(item.getId(), clonarItem(item, 1));
@@ -849,6 +864,12 @@ public class Lojas {
      */
     public OrdemReceita iniciarReceita(ReceitaLoja receita, Item resultado, int lotes, int dia, int hora,
                                        OrdemReceita.Origem origem, boolean insumosPorConta) {
+        return iniciarReceita(receita, resultado, lotes, dia, hora, origem, insumosPorConta, null);
+    }
+
+    /** @param rotuloMesa origem gravada no livro-caixa (ex.: "[Mesa Norte · dia 8]"); null = sem mesa */
+    public OrdemReceita iniciarReceita(ReceitaLoja receita, Item resultado, int lotes, int dia, int hora,
+                                       OrdemReceita.Origem origem, boolean insumosPorConta, String rotuloMesa) {
         if (receita == null || resultado == null || lotes < 1) return null;
         PlanoProducao plano = planejar(receita, lotes, !insumosPorConta);
         if (!insumosPorConta) {
@@ -858,7 +879,8 @@ public class Lojas {
             plano.materiais().forEach((id, qtd) -> removerUnidades(id, qtd));
             registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CRAFTING,
                     resultado.getNome(), receita.quantidadeResultado() * lotes, maoDeObra,
-                    "Mão de obra: " + receita.nome() + (origem == OrdemReceita.Origem.MESTRE ? " (ordem do Mestre)" : ""));
+                    (rotuloMesa != null ? rotuloMesa + " " : "") + "Mão de obra: " + receita.nome()
+                            + (origem == OrdemReceita.Origem.MESTRE ? " (ordem do Mestre)" : ""));
         }
 
         if (receita.etapas().isEmpty()) {
@@ -891,6 +913,7 @@ public class Lojas {
         Iterator<OrdemReceita> it = ordensReceita.iterator();
         while (it.hasNext()) {
             OrdemReceita ordem = it.next();
+            if (ordem.isProntaAguardando()) continue;
             for (OrdemReceita.EtapaOrdem e : ordem.getEtapas()) {
                 if (e.getEstado() != OrdemReceita.EstadoEtapa.PENDENTE || (e.getDiaConclusao() > dia && !ordem.prontaNoDia(dia))) continue;
                 e.setEstado(OrdemReceita.EstadoEtapa.RESERVADA);
@@ -899,8 +922,18 @@ public class Lojas {
                         peca != null ? peca.getNome() : "Peça #" + e.getComponenteItemId(), ordem.getLotes(), 0L, "Peça pronta, reservada para a encomenda");
             }
             if (!ordem.prontaNoDia(dia)) continue;
-            it.remove();
             ReceitaLoja receita = receitas.get(ordem.getReceitaId());
+            if (ordem.isDaMesa()) {
+                // Encomenda de mesa: o resultado fica guardado até a mesa chegar ao prazo dela
+                ordem.marcarProntaAguardando();
+                Item modelo = receita != null ? catalogo.get(receita.itemResultadoId()) : null;
+                registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CONCLUIDA,
+                        modelo != null ? modelo.getNome() : "Receita #" + ordem.getReceitaId(), ordem.getLotes(), 0L,
+                        "Encomenda pronta, reservada até a mesa chegar ao dia " + ordem.getDiaConclusaoMesa());
+                concluidas++;
+                continue;
+            }
+            it.remove();
             Item modelo = receita != null ? catalogo.get(receita.itemResultadoId()) : null;
             if (modelo == null) {
                 registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PERDA_DETERIORACAO,
@@ -920,10 +953,45 @@ public class Lojas {
     /** O Mestre apressa a oficina: a ordem termina agora, sem esperar os dias de produção. */
     public boolean concluirImediatamente(OrdemReceita ordem, int dia, int hora, Map<Integer, ReceitaLoja> receitas, Map<Integer, Item> catalogo) {
         if (ordem == null || !ordensReceita.remove(ordem)) return false;
-        OrdemReceita pronta = new OrdemReceita(ordem.getId(), ordem.getReceitaId(), ordem.getLotes(), ordem.getDiaInicio(), dia,
-                ordem.getOrigem(), ordem.isInsumosPorConta(), ordem.getEtapas());
-        ordensReceita.add(pronta);
+        ordensReceita.add(ordem.comConclusao(dia));
         return concluirOrdensProntas(dia, hora, receitas, catalogo) > 0;
+    }
+
+    /** Ordens que ainda ocupam a oficina (encomendas prontas esperando a mesa não contam). */
+    public int getOrdensEmProducao() {
+        int n = 0;
+        for (OrdemReceita o : ordensReceita) if (!o.isProntaAguardando()) n++;
+        return n;
+    }
+
+    /**
+     * Encomenda de mesa chegou ao prazo no relógio da mesa: sai da oficina mesmo que a loja
+     * não tenha terminado ("no passado, ela já estava pronta"). Sem personagem destinatário,
+     * o resultado entra no estoque para o Mestre vender; com personagem, é devolvido a quem
+     * chamou para ir à ficha.
+     *
+     * @param rotuloMesa ex.: "[Mesa Norte · dia 13]", gravado no livro-caixa
+     * @return o resultado (com a quantidade), ou null se a receita ou o item foi apagado
+     */
+    public Item entregarEncomenda(OrdemReceita ordem, int dia, int hora, Map<Integer, ReceitaLoja> receitas,
+                                  Map<Integer, Item> catalogo, String rotuloMesa) {
+        if (ordem == null || !ordensReceita.remove(ordem)) return null;
+        ReceitaLoja receita = receitas.get(ordem.getReceitaId());
+        Item modelo = receita != null ? catalogo.get(receita.itemResultadoId()) : null;
+        if (modelo == null) {
+            registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PERDA_DETERIORACAO,
+                    "Receita #" + ordem.getReceitaId(), ordem.getLotes(), 0L, rotuloMesa + " Encomenda perdida: a receita ou o item foi apagado");
+            return null;
+        }
+        int qtd = receita.quantidadeResultado() * ordem.getLotes();
+        String antecipada = ordem.isProntaAguardando() ? "" : " (concluída antes do prazo da loja)";
+        if (ordem.getFichaId() == null) {
+            adicionarItem(clonarItem(modelo, qtd));
+            entradasRecentes.merge(modelo.getId(), qtd, Integer::sum);
+        }
+        registrarMovimentacao(dia, hora, RegistroMovimentacao.TipoOperacao.PRODUCAO_CONCLUIDA, modelo.getNome(), qtd, 0L,
+                rotuloMesa + " Encomenda entregue" + antecipada + (ordem.getFichaId() == null ? ", no balcão" : " ao personagem"));
+        return clonarItem(modelo, qtd);
     }
 
     /**
@@ -935,7 +1003,10 @@ public class Lojas {
         if (ordem == null || !ordensReceita.remove(ordem)) return false;
         ReceitaLoja receita = receitas.get(ordem.getReceitaId());
         Map<Integer, Integer> devolvidos = new LinkedHashMap<>();
-        if (ordem.getEtapas().isEmpty()) {
+        if (ordem.isProntaAguardando()) {
+            // A peça já estava pronta esperando a mesa: vira estoque comum
+            if (receita != null) devolvidos.merge(receita.itemResultadoId(), receita.quantidadeResultado() * ordem.getLotes(), Integer::sum);
+        } else if (ordem.getEtapas().isEmpty()) {
             if (receita != null && !ordem.isInsumosPorConta()) {
                 for (ReceitaLoja.Insumo ins : receita.insumos()) devolvidos.merge(ins.itemId(), ins.quantidade() * ordem.getLotes(), Integer::sum);
             }
@@ -961,8 +1032,18 @@ public class Lojas {
 
     /** Peças prontas na oficina reservadas para encomendas (itemId -> unidades). Não podem ser vendidas. */
     public Map<Integer, Integer> getReservados() {
+        return getReservados(Map.of());
+    }
+
+    /** Idem, incluindo o resultado das encomendas de mesa que a loja terminou e esperam o prazo da mesa. */
+    public Map<Integer, Integer> getReservados(Map<Integer, ReceitaLoja> receitas) {
         Map<Integer, Integer> r = new LinkedHashMap<>();
         for (OrdemReceita o : ordensReceita) {
+            if (o.isProntaAguardando()) {
+                ReceitaLoja receita = receitas.get(o.getReceitaId());
+                if (receita != null) r.merge(receita.itemResultadoId(), receita.quantidadeResultado() * o.getLotes(), Integer::sum);
+                continue;
+            }
             for (OrdemReceita.EtapaOrdem e : o.getEtapas()) {
                 if (e.isReservada()) r.merge(e.getComponenteItemId(), o.getLotes(), Integer::sum);
             }

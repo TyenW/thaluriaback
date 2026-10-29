@@ -30,7 +30,11 @@ public class ControlePermissoesMestre {
     private final Map<String, NivelVisibilidadeMapa> visibilidadeCidades = new LinkedHashMap<>();
     private final Map<String, NivelVisibilidadeMapa> visibilidadeConexoes = new LinkedHashMap<>();
 
-    // Controle de Dia de Campanha pelo Mestre
+    /**
+     * Cópia do dia da campanha, gravada em controle_mestre. A fonte da verdade é a mesa ativa mais
+     * à frente (MotorEconomico.getDiaCampanha, docs/Sistema de Economia/05); o servidor sincroniza
+     * este valor depois de cada avanço.
+     */
     private int diaAtualCampanha = 1;
 
     public ControlePermissoesMestre() {
@@ -128,26 +132,6 @@ public class ControlePermissoesMestre {
     public int getDiaAtualCampanha() { return diaAtualCampanha; }
 
     public void setDiaAtualCampanha(int dia) { diaAtualCampanha = Math.max(1, dia); }
-
-    public int avancarDiaMestre(economia.MotorEconomico motor) {
-        diaAtualCampanha++;
-        if (motor != null) {
-            motor.avancarTempo(24);
-        }
-        return diaAtualCampanha;
-    }
-
-    public void avancarDiasDeMercado(int dias, Random r) {
-        int d = Math.max(1, dias);
-        diaAtualCampanha += d;
-    }
-
-    public void avancarDiasDeMercado(int dias, economia.MotorEconomico motor, Random r) {
-        int d = Math.max(1, dias);
-        for (int i = 0; i < d; i++) {
-            avancarDiaMestre(motor);
-        }
-    }
 
     public boolean isMonstroReveladoNoBestiario(String idOuNomeMonstro) {
         return isMonstroRevelado(idOuNomeMonstro);
